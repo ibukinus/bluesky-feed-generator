@@ -2,8 +2,9 @@ from datetime import datetime
 
 import peewee
 
+from server import config
 
-db = peewee.SqliteDatabase('feed_database.db')
+db = peewee.SqliteDatabase(config.FEEDGEN_SQLITE_LOCATION)
 
 
 class BaseModel(peewee.Model):

@@ -2,6 +2,7 @@ from atproto import models
 
 from server.logger import logger
 from server.database import db, Post
+from server.matcher import match_shiny_colors
 
 
 def operations_callback(ops: dict) -> None:
@@ -15,13 +16,12 @@ def operations_callback(ops: dict) -> None:
     for created_post in ops['posts']['created']:
         record = created_post['record']
 
-        # print all texts just as demo that data stream works
-        post_with_images = isinstance(record.embed, models.AppBskyEmbedImages.Main)
-        inlined_text = record.text.replace('\n', ' ')
-        logger.info(f'New post (with images: {post_with_images}): {inlined_text}')
+        # Post languageで日本語が設定されていない投稿を除外する
+        langs = record['langs']
+        if  langs is None or not 'ja' in langs:
+            continue
 
-        # only alf-related posts
-        if 'alf' in record.text.lower():
+        if match_shiny_colors(record.text):
             reply_parent = None
             if record.reply and record.reply.parent.uri:
                 reply_parent = record.reply.parent.uri
@@ -41,10 +41,8 @@ def operations_callback(ops: dict) -> None:
     posts_to_delete = [p['uri'] for p in ops['posts']['deleted']]
     if posts_to_delete:
         Post.delete().where(Post.uri.in_(posts_to_delete))
-        logger.info(f'Deleted from feed: {len(posts_to_delete)}')
 
     if posts_to_create:
         with db.atomic():
             for post_dict in posts_to_create:
                 Post.create(**post_dict)
-        logger.info(f'Added to feed: {len(posts_to_create)}')

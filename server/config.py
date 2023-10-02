@@ -10,7 +10,9 @@ if SERVICE_DID is None:
     SERVICE_DID = f'did:web:{HOSTNAME}'
 
 
-WHATS_ALF_URI = os.environ.get('WHATS_ALF_URI')
-if WHATS_ALF_URI is None:
+SHINY_URI = os.environ.get('SHINY_URI')
+if SHINY_URI is None:
     raise RuntimeError('Publish your feed first (run publish_feed.py) to obtain Feed URI. '
-                       'Set this URI to "WHATS_ALF_URI" environment variable.')
+                       'Set this URI to "SHINY_URI" environment variable.')
+
+FEEDGEN_SQLITE_LOCATION = os.environ.get('FEEDGEN_SQLITE_LOCATION')
