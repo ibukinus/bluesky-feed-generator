@@ -19,8 +19,6 @@ rank2_regex = re.compile("^" + "$|^".join(rank2) + "$", re.IGNORECASE)
 
 def match_shiny_colors(text: str) -> bool:
     """与えられた文章にシャニマスに関連するワードが含まれるか検査します。
-
-    呼び出し規約や副作用
     
     Args:
         text (str): 検査対象のテキスト
