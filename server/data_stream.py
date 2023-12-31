@@ -69,8 +69,6 @@ def _run(name, operations_callback, stream_stop_event=None):
     if state:
         params = models.ComAtprotoSyncSubscribeRepos.Params(cursor=state.cursor)
 
-    # 従来のPDSからBGSに繋ぎ替え（暫定処置）
-    # base_uri = "wss://bsky.network/xrpc"
     client = FirehoseSubscribeReposClient(params)
 
     if not state:
