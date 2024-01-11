@@ -31,4 +31,4 @@ COPY --from=builder /usr/local/bin/gunicorn /usr/local/bin/gunicorn
 COPY --chown=feedgen:feedgen . .
 
 EXPOSE 8000
-CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0", "server.app:app"]
+CMD ["gunicorn", "-b", "0.0.0.0", "server.app:app"]
