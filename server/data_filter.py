@@ -1,4 +1,5 @@
 from atproto import models
+from atproto_client.models.app.bsky.embed.images import Image
 
 from server.logger import logger
 from server.database import db, Post
@@ -21,7 +22,18 @@ def operations_callback(ops: dict) -> None:
         if  langs is None or not 'ja' in langs:
             continue
 
-        if match_shiny_colors(record.text):
+        # 本文に収集対象のワードが含まれるか
+        is_match = match_shiny_colors(record.text)
+
+        # 画像のALTテキストに収集対象のワードが含まれるか
+        if record['embed'] is not None and record['embed']['py_type'] == 'app.bsky.embed.images':
+            images: list[Image] = record['embed']['images']
+            for image in images:
+                if match_shiny_colors(image.alt):
+                    is_match = True
+                    break
+
+        if is_match:
             reply_parent = None
             if record.reply and record.reply.parent.uri:
                 reply_parent = record.reply.parent.uri
