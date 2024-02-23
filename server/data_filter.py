@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 from atproto import models
 from atproto_client.models.app.bsky.embed.images import Image
 
@@ -6,7 +8,7 @@ from server.database import db, Post
 from server.matcher import match_shiny_colors
 
 
-def operations_callback(ops: dict) -> None:
+def operations_callback(ops: defaultdict) -> None:
     # Here we can filter, process, run ML classification, etc.
     # After our feed alg we can save posts into our DB
     # Also, we should process deleted posts to remove them from our DB and keep it in sync
@@ -14,7 +16,8 @@ def operations_callback(ops: dict) -> None:
     # for example, let's create our custom feed that will contain all posts that contains alf related text
 
     posts_to_create = []
-    for created_post in ops['posts']['created']:
+    for created_post in ops[models.ids.AppBskyFeedPost]['created']:
+        author = created_post['author']
         record = created_post['record']
 
         # Post languageで日本語が設定されていない投稿を除外する
@@ -41,6 +44,7 @@ def operations_callback(ops: dict) -> None:
             reply_root = None
             if record.reply and record.reply.root.uri:
                 reply_root = record.reply.root.uri
+                reply_parent = record.reply.parent.uri
 
             post_dict = {
                 'uri': created_post['uri'],
@@ -50,9 +54,11 @@ def operations_callback(ops: dict) -> None:
             }
             posts_to_create.append(post_dict)
 
-    posts_to_delete = [p['uri'] for p in ops['posts']['deleted']]
+    posts_to_delete = ops[models.ids.AppBskyFeedPost]['deleted']
     if posts_to_delete:
-        Post.delete().where(Post.uri.in_(posts_to_delete))
+        post_uris_to_delete = [post['uri'] for post in posts_to_delete]
+        Post.delete().where(Post.uri.in_(post_uris_to_delete))
+        # logger.info(f'Deleted from feed: {len(post_uris_to_delete)}')
 
     if posts_to_create:
         with db.atomic():
