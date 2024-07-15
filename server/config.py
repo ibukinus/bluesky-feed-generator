@@ -16,3 +16,6 @@ if SHINY_URI is None:
                        'Set this URI to "SHINY_URI" environment variable.')
 
 FEEDGEN_SQLITE_LOCATION = os.environ.get('FEEDGEN_SQLITE_LOCATION')
+
+EXCLUDED_DID = os.environ.get('EXCLUDED_DID', '')
+EXCLUDED_DID_LIST = EXCLUDED_DID.split(';')

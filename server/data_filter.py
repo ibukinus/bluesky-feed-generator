@@ -3,6 +3,7 @@ from collections import defaultdict
 from atproto import models
 from atproto_client.models.app.bsky.embed.images import Image
 
+from server import config
 from server.logger import logger
 from server.database import db, Post
 from server.matcher import match_shiny_colors
@@ -19,6 +20,10 @@ def operations_callback(ops: defaultdict) -> None:
     for created_post in ops[models.ids.AppBskyFeedPost]['created']:
         author = created_post['author']
         record = created_post['record']
+
+        # 投稿者のDIDが除外DIDリストに該当する場合は除外する
+        if author in config.EXCLUDED_DID_LIST:
+            continue
 
         # Post languageで日本語が設定されていない投稿を除外する
         langs = record['langs']
