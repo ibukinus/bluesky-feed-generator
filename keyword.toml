@@ -197,14 +197,16 @@ rank1 = [
     "パーティーマジックデザイナー",
     "after run",
     "open the new world",
-    "midnight parade!",
+    "midnight parade\\!",
     "candy universe",
     "アスタラブビスタ",
     "daydream love",
     "mellow mellow",
     "サマーサマーオーシャンパーリィバケーション",
     "cyber parkour",
-    "live live live!",
+    "live live live\\!",
+    "heads or tails\\?",
+    "橙より未来",
 ]
 
 rank2 = [
@@ -288,4 +290,5 @@ rank2 = [
     "もちほわ",
     "links",
     "ねぇ、ねぇ、ねぇ",
+    "with you",
 ]
