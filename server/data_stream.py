@@ -82,7 +82,6 @@ def _run(name, operations_callback, stream_stop_event=None):
             if commit.seq % 20 == 0:
                 client.update_params(models.ComAtprotoSyncSubscribeRepos.Params(cursor=commit.seq))
                 SubscriptionState.update(cursor=commit.seq).where(SubscriptionState.service == name).execute()
-                logger.info('Update cursor: ' + commit.seq)
 
             if not commit.blocks:
                 return
