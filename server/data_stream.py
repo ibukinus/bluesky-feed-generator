@@ -73,18 +73,22 @@ def _run(name, operations_callback, stream_stop_event=None):
             client.stop()
             return
 
-        commit = parse_subscribe_repos_message(message)
-        if not isinstance(commit, models.ComAtprotoSyncSubscribeRepos.Commit):
+        try:
+            commit = parse_subscribe_repos_message(message)
+            if not isinstance(commit, models.ComAtprotoSyncSubscribeRepos.Commit):
+                return
+
+            # update stored state every ~20 events
+            if commit.seq % 20 == 0:
+                client.update_params(models.ComAtprotoSyncSubscribeRepos.Params(cursor=commit.seq))
+                SubscriptionState.update(cursor=commit.seq).where(SubscriptionState.service == name).execute()
+
+            if not commit.blocks:
+                return
+
+            operations_callback(_get_ops_by_type(commit))
+        except Exception as e:
+            logger.warn(e)
             return
-
-        # update stored state every ~20 events
-        if commit.seq % 20 == 0:
-            client.update_params(models.ComAtprotoSyncSubscribeRepos.Params(cursor=commit.seq))
-            SubscriptionState.update(cursor=commit.seq).where(SubscriptionState.service == name).execute()
-
-        if not commit.blocks:
-            return
-
-        operations_callback(_get_ops_by_type(commit))
 
     client.start(on_message_handler)
