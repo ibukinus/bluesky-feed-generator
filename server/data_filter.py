@@ -25,21 +25,27 @@ def operations_callback(ops: defaultdict) -> None:
         if author in config.EXCLUDED_DID_LIST:
             continue
 
-        # Post languageで日本語が設定されていない投稿を除外する
-        langs = record['langs']
-        if  langs is None or not 'ja' in langs:
-            continue
+        is_match = False
 
-        # 本文に収集対象のワードが含まれるか
-        is_match = match_shiny_colors(record.text)
+        # 投稿者のDIDが優先DIDリストに該当する場合は収集対象とする
+        if author in config.PRIORITY_DID_LIST:
+            is_match = True
+        else:
+            # Post languageで日本語が設定されていない投稿を除外する
+            langs = record['langs']
+            if  langs is None or not 'ja' in langs:
+                continue
 
-        # 画像のALTテキストに収集対象のワードが含まれるか
-        if record['embed'] is not None and record['embed']['py_type'] == 'app.bsky.embed.images':
-            images: list[Image] = record['embed']['images']
-            for image in images:
-                if match_shiny_colors(image.alt):
-                    is_match = True
-                    break
+            # 本文に収集対象のワードが含まれるか
+            is_match = match_shiny_colors(record.text)
+
+            # 画像のALTテキストに収集対象のワードが含まれるか
+            if record['embed'] is not None and record['embed']['py_type'] == 'app.bsky.embed.images':
+                images: list[Image] = record['embed']['images']
+                for image in images:
+                    if match_shiny_colors(image.alt):
+                        is_match = True
+                        break
 
         if is_match:
             reply_parent = None
