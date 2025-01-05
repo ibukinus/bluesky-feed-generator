@@ -94,7 +94,7 @@ def _run(name, operations_callback, stream_stop_event=None):
 
             operations_callback(_get_ops_by_type(commit))
         except Exception as e:
-            logger.warn(e)
+            logger.warning(e)
             return
 
     client.start(on_message_handler)
