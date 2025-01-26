@@ -1,3 +1,5 @@
+import datetime
+
 from collections import defaultdict
 
 from atproto import models
@@ -7,6 +9,35 @@ from server import config
 from server.logger import logger
 from server.database import db, Post
 from server.matcher import match_shiny_colors
+
+
+def is_archive_post(record: 'models.AppBskyFeedPost.Record') -> bool:
+    # Sometimes users will import old posts from Twitter/X which con flood a feed with
+    # old posts. Unfortunately, the only way to test for this is to look an old
+    # created_at date. However, there are other reasons why a post might have an old
+    # date, such as firehose or firehose consumer outages. It is up to you, the feed
+    # creator to weigh the pros and cons, amd and optionally include this function in
+    # your filter conditions, and adjust the threshold to your liking.
+    #
+    # See https://github.com/MarshalX/bluesky-feed-generator/pull/21
+
+    archived_threshold = datetime.timedelta(days=1)
+    created_at = datetime.datetime.fromisoformat(record.created_at)
+    now = datetime.datetime.now(datetime.UTC)
+
+    return now - created_at > archived_threshold
+
+
+def should_ignore_post(record: 'models.AppBskyFeedPost.Record') -> bool:
+    if config.IGNORE_ARCHIVED_POSTS and is_archive_post(record):
+        logger.debug(f'Ignoring archived post: {record.uri}')
+        return True
+
+    if config.IGNORE_REPLY_POSTS and record.reply:
+        logger.debug(f'Ignoring reply post: {record.uri}')
+        return True
+
+    return False
 
 
 def operations_callback(ops: defaultdict) -> None:
@@ -20,6 +51,9 @@ def operations_callback(ops: defaultdict) -> None:
     for created_post in ops[models.ids.AppBskyFeedPost]['created']:
         author = created_post['author']
         record = created_post['record']
+
+        if should_ignore_post(record):
+            continue
 
         # 投稿者のDIDが除外DIDリストに該当する場合は除外する
         if author in config.EXCLUDED_DID_LIST:
