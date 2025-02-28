@@ -28,13 +28,16 @@ def is_archive_post(record: 'models.AppBskyFeedPost.Record') -> bool:
     return now - created_at > archived_threshold
 
 
-def should_ignore_post(record: 'models.AppBskyFeedPost.Record') -> bool:
+def should_ignore_post(created_post: dict) -> bool:
+    record = created_post['record']
+    uri = created_post['uri']
+
     if config.IGNORE_ARCHIVED_POSTS and is_archive_post(record):
-        logger.debug(f'Ignoring archived post: {record.uri}')
+        logger.debug(f'Ignoring archived post: {uri}')
         return True
 
     if config.IGNORE_REPLY_POSTS and record.reply:
-        logger.debug(f'Ignoring reply post: {record.uri}')
+        logger.debug(f'Ignoring reply post: {uri}')
         return True
 
     return False
@@ -45,14 +48,14 @@ def operations_callback(ops: defaultdict) -> None:
     # After our feed alg we can save posts into our DB
     # Also, we should process deleted posts to remove them from our DB and keep it in sync
 
-    # for example, let's create our custom feed that will contain all posts that contains alf related text
+    # for example, let's create our custom feed that will contain all posts that contains 'python' related text
 
     posts_to_create = []
     for created_post in ops[models.ids.AppBskyFeedPost]['created']:
         author = created_post['author']
         record = created_post['record']
 
-        if should_ignore_post(record):
+        if should_ignore_post(created_post):
             continue
 
         # 投稿者のDIDが除外DIDリストに該当する場合は除外する
