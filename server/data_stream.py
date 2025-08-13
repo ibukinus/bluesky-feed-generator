@@ -86,29 +86,15 @@ def _run(name, operations_callback, stream_stop_event=None):
             # update stored state every ~1k events
             if commit.seq % 1000 == 0:  # lower value could lead to performance issues
                 logger.debug(f'Updated cursor for {name} to {commit.seq}')
-                try:
-                    client.update_params(models.ComAtprotoSyncSubscribeRepos.Params(cursor=commit.seq))
-                    SubscriptionState.update(cursor=commit.seq).where(SubscriptionState.service == name).execute()
-                except Exception as db_error:
-                    logger.error(f'Failed to update cursor state: {db_error}')
-                    # カーソル更新に失敗してもストリーム処理は継続
+                client.update_params(models.ComAtprotoSyncSubscribeRepos.Params(cursor=commit.seq))
+                SubscriptionState.update(cursor=commit.seq).where(SubscriptionState.service == name).execute()
 
             if not commit.blocks:
                 return
 
-            try:
-                operations_callback(_get_ops_by_type(commit))
-            except Exception as callback_error:
-                logger.error(f'Operations callback failed for commit {commit.seq}: {callback_error}')
-                # コールバックエラーでもストリーム処理は継続
-                
-        except models.AtProtocolError as proto_error:
-            # AT Protocolレベルのエラー
-            logger.error(f'AT Protocol error in message handler: {proto_error}')
-            return
+            operations_callback(_get_ops_by_type(commit))
         except Exception as e:
-            # その他の予期しないエラー
-            logger.error(f'Unexpected error in message handler: {e}', exc_info=True)
+            logger.warning(e)
             return
 
     client.start(on_message_handler)
