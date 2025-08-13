@@ -69,30 +69,30 @@ def operations_callback(ops: defaultdict) -> None:
             is_match = True
         else:
             # Post languageで日本語が設定されていない投稿を除外する
-            langs = record.langs
-            if langs is None or 'ja' not in langs:
+            langs = record['langs']
+            if  langs is None or not 'ja' in langs:
                 continue
 
             # 本文に収集対象のワードが含まれるか
             is_match = match_shiny_colors(record.text)
 
             # 画像のALTテキストに収集対象のワードが含まれるか
-            if record.embed is not None and record.embed.py_type == 'app.bsky.embed.images':
-                images: list[Image] = record.embed.images
+            if record['embed'] is not None and record['embed']['py_type'] == 'app.bsky.embed.images':
+                images: list[Image] = record['embed']['images']
                 for image in images:
-                    if image.alt and match_shiny_colors(image.alt):
+                    if match_shiny_colors(image.alt):
                         is_match = True
                         break
 
         if is_match:
             reply_parent = None
+            if record.reply and record.reply.parent.uri:
+                reply_parent = record.reply.parent.uri
+
             reply_root = None
-            
-            if record.reply:
-                if record.reply.parent.uri:
-                    reply_parent = record.reply.parent.uri
-                if record.reply.root.uri:
-                    reply_root = record.reply.root.uri
+            if record.reply and record.reply.root.uri:
+                reply_root = record.reply.root.uri
+                reply_parent = record.reply.parent.uri
 
             post_dict = {
                 'uri': created_post['uri'],
@@ -105,8 +105,8 @@ def operations_callback(ops: defaultdict) -> None:
     posts_to_delete = ops[models.ids.AppBskyFeedPost]['deleted']
     if posts_to_delete:
         post_uris_to_delete = [post['uri'] for post in posts_to_delete]
-        deleted_count = Post.delete().where(Post.uri.in_(post_uris_to_delete)).execute()
-        logger.debug(f'Deleted from feed: {deleted_count}')
+        Post.delete().where(Post.uri.in_(post_uris_to_delete))
+        logger.debug(f'Deleted from feed: {len(post_uris_to_delete)}')
 
     if posts_to_create:
         with db.atomic():
