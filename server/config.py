@@ -26,13 +26,13 @@ if SHINY_URI is None:
     raise RuntimeError('Publish your feed first (run publish_feed.py) to obtain Feed URI. '
                        'Set this URI to "SHINY_URI" environment variable.')
 
-FEEDGEN_SQLITE_LOCATION = os.environ.get('FEEDGEN_SQLITE_LOCATION')
+FEEDGEN_SQLITE_LOCATION = os.environ.get('FEEDGEN_SQLITE_LOCATION', 'feed.db')
 
 EXCLUDED_DID = os.environ.get('EXCLUDED_DID', '')
-EXCLUDED_DID_LIST = EXCLUDED_DID.split(';')
+EXCLUDED_DID_LIST = [did for did in EXCLUDED_DID.split(';') if did.strip()]
 
 PRIORITY_DID = os.environ.get('PRIORITY_DID', '')
-PRIORITY_DID_LIST = PRIORITY_DID.split(';')
+PRIORITY_DID_LIST = [did for did in PRIORITY_DID.split(';') if did.strip()]
 
 def _get_bool_env_var(value: str) -> bool:
     if value is None:
