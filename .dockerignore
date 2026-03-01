@@ -1,2 +1,12 @@
 .git
 .github
+.venv
+__pycache__
+*.pyc
+db/
+.devcontainer
+.vscode
+.claude
+*.db
+.env
+.python-version
