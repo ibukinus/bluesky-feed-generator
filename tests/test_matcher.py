@@ -1,0 +1,55 @@
+from server.matcher import match_shiny_colors
+
+
+class TestMatchShinyColorsRank1:
+    """rank1キーワード（単体でマッチ）のテスト"""
+
+    def test_exact_keyword(self):
+        assert match_shiny_colors("シャニマス") is True
+
+    def test_keyword_in_sentence(self):
+        assert match_shiny_colors("今日もシャニマスやるぞ") is True
+
+    def test_unit_name(self):
+        assert match_shiny_colors("イルミネーションスターズが好き") is True
+
+    def test_character_full_name(self):
+        assert match_shiny_colors("櫻木真乃ちゃん可愛い") is True
+
+    def test_song_title(self):
+        assert match_shiny_colors("シャイノグラフィ最高") is True
+
+    def test_shiny_colors_full(self):
+        assert match_shiny_colors("シャイニーカラーズ") is True
+
+    def test_abbreviation(self):
+        assert match_shiny_colors("放クラ推し") is True
+
+    def test_case_insensitive_english(self):
+        assert match_shiny_colors("SONG FOR PRISMを聴いた") is True
+
+
+class TestMatchShinyColorsRank2:
+    """rank2キーワード（2つ以上でマッチ）のテスト"""
+
+    def test_single_rank2_no_match(self):
+        assert match_shiny_colors("櫻木さんと会った") is False
+
+    def test_two_rank2_match(self):
+        assert match_shiny_colors("櫻木と風野が共演") is True
+
+    def test_surname_and_firstname(self):
+        assert match_shiny_colors("真乃と灯織のコンビ") is True
+
+
+class TestMatchShinyColorsNoMatch:
+    """マッチしないケースのテスト"""
+
+    def test_unrelated_text(self):
+        assert match_shiny_colors("今日は天気がいい") is False
+
+    def test_empty_string(self):
+        assert match_shiny_colors("") is False
+
+    def test_only_common_words(self):
+        assert match_shiny_colors("東京で買い物をした") is False
