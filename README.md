@@ -130,6 +130,13 @@ uv run python publish_feed.py
         └── shiny_colors.py  # フィードアルゴリズム
 ```
 
+## ドキュメント
+
+詳細な文書は [docs/](docs/README.md) にあります。
+
+- [アーキテクチャ](docs/architecture.md) — データフロー、モジュール構成、キーワードマッチング仕様、設計上の注意点
+- [調査レポート](docs/README.md#レポート一覧) — 日付つきのスナップショット
+
 ## ライセンス
 
 MIT
