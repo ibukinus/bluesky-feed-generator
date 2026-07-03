@@ -17,7 +17,8 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 COPY sudachi.json user.csv ./
 COPY scripts/build_user_dict.py scripts/
-RUN uv run python scripts/build_user_dict.py
+# --no-sync: この時点では server/ が未コピーのため、プロジェクトや dev 依存を venv に入れない
+RUN uv run --no-sync python scripts/build_user_dict.py
 
 FROM python:3.11-slim AS runner
 
