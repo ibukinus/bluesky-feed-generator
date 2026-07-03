@@ -70,10 +70,13 @@ cp .env.example .env
 
 ```shell
 uv sync
+uv run python scripts/build_user_dict.py  # Sudachi ユーザー辞書の組み込み（初回と user.csv 更新時）
 flask --debug run
 ```
 
 サーバーは `http://127.0.0.1:8000` で起動します。
+
+pytest 実行時は `conftest.py` が辞書ビルドを自動で行うため、手動実行は不要です。
 
 ### Docker（本番環境）
 
@@ -81,9 +84,29 @@ flask --debug run
 docker compose up
 ```
 
+- CI が push した GHCR イメージ（`ghcr.io/ibukinus/bluesky-feed-generator:latest`）を使用（ローカルでビルドする場合は `docker compose build`）
+- GHCR イメージは **linux/arm64 のみ**（デプロイ先の OCI VM と Apple Silicon Mac に対応）。x86_64 ホストでは `docker compose build` でローカルビルドすること
 - gunicorn で `0.0.0.0:8000` にバインド
-- `./db` をボリュームマウントして DB を永続化
+- `./db` をボリュームマウントして DB を永続化（`.env` に `FEEDGEN_SQLITE_LOCATION=db/feed.db` を明示すること）
 - `.env` から環境変数を読み込み
+
+### デプロイ（CI/CD）
+
+`shiny` ブランチへの push で GitHub Actions（`.github/workflows/deploy.yml`）が「テスト → Docker イメージビルド → GHCR への push → VM へのデプロイ」を自動実行します。PR には CI（`.github/workflows/ci.yml`）がテストを実行します。
+
+**必要なリポジトリシークレット:**
+
+| シークレット | 説明 |
+|------|------|
+| `DEPLOY_SSH_HOST` | デプロイ先 VM のホスト名 / IP |
+| `DEPLOY_SSH_USER` | SSH ユーザー名 |
+| `DEPLOY_SSH_KEY` | SSH 秘密鍵（PEM 形式） |
+| `DEPLOY_APP_DIR` | VM 上の `compose.yml` と `.env` を配置したディレクトリ |
+
+**VM 側の事前準備（初回のみ）:**
+
+1. `compose.yml` と `.env` を `DEPLOY_APP_DIR` に配置する
+2. GHCR のパッケージ（`ghcr.io/ibukinus/bluesky-feed-generator`）を public に設定する（private のままにする場合は VM 上で `docker login ghcr.io` を済ませておく）
 
 ## フィードの公開
 
@@ -106,6 +129,9 @@ uv run python publish_feed.py
 ## プロジェクト構成
 
 ```
+├── .github/workflows/   # CI・自動デプロイ（GitHub Actions）
+├── scripts/
+│   └── build_user_dict.py  # Sudachi ユーザー辞書ビルド（pytest/Docker が自動実行）
 ├── Dockerfile           # マルチステージビルド
 ├── compose.yml          # Docker Compose 設定
 ├── pyproject.toml       # プロジェクト設定・依存関係

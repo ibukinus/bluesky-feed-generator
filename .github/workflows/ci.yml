@@ -1,0 +1,23 @@
+# PR に対するテスト実行。ユーザー辞書は conftest.py が自動ビルドするため、
+# 本番（Docker）と同じ辞書でマッチングが検証される。
+name: CI
+
+on:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: uv をセットアップ
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      - name: 依存関係をインストール
+        run: uv sync --frozen
+
+      - name: テストを実行
+        run: uv run pytest

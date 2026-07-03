@@ -11,6 +11,7 @@ Bluesky の Firehose から「シャイニーカラーズ」関連の日本語�
 ```shell
 uv sync                # 依存関係のインストール
 uv run pytest          # テスト実行（全件パスを維持すること）
+uv run python scripts/build_user_dict.py  # Sudachi ユーザー辞書の組み込み（pytest / Docker は自動実行）
 flask --debug run      # 開発サーバー起動（.flaskenv で port 8000）
 docker compose up      # 本番相当の起動
 uv run python publish_feed.py  # フィードレコードの公開/更新
@@ -21,7 +22,7 @@ uv run python publish_feed.py  # フィードレコードの公開/更新
 ## テスト
 
 - 変更後は必ず `uv run pytest` を実行し、全件パスを確認してからコミットする。
-- テスト用の環境変数はルートの `conftest.py` が設定する（in-memory SQLite 等）。
+- テスト用の環境変数はルートの `conftest.py` が設定する（in-memory SQLite 等）。Sudachi ユーザー辞書も `conftest.py` が自動ビルドするため、テストは本番と同じ辞書で走る。
 - `server/config.py` は import 時に `HOSTNAME` / `SHINY_URI` 未設定だと例外を投げる。server 配下のモジュールを REPL やスクリプトから import する場合は、先にこれらの環境変数を設定すること。
 
 ## import 時の副作用（重要）
@@ -40,7 +41,7 @@ uv run python publish_feed.py  # フィードレコードの公開/更新
 
 ## 環境差の罠
 
-- **Sudachi ユーザー辞書（user.csv）は Docker ビルド時のみ組み込まれる。** ローカル実行・pytest はシステム辞書のみで動くため、正規化依存のマッチはローカルで再現しない。ユーザー辞書に依存する変更は Docker で動作確認する。
+- **Sudachi ユーザー辞書（user.csv）は `scripts/build_user_dict.py` で venv 内の sudachipy に組み込む。** pytest（conftest.py）と Docker ビルドは自動実行する。`uv sync` で venv を作り直すと辞書は消えるが、次回の pytest かスクリプト実行で再ビルドされる。`flask run` で辞書を使う場合は先にスクリプトを実行すること。
 - **Docker 運用では `.env` に `FEEDGEN_SQLITE_LOCATION=db/feed.db` を明示する。** デフォルトの `feed.db` はボリュームマウント外で、コンテナ再作成時に消える。
 - **gunicorn は1ワーカー前提。** ワーカーを増やすと Firehose 購読が重複するため、ワーカー数を変更しないこと。
 

@@ -1,5 +1,7 @@
 services:
   app:
+    # CI がビルドして push したイメージを pull して使う（ローカルビルドは docker compose build）
+    image: ghcr.io/ibukinus/bluesky-feed-generator:latest
     build:
       context: .
       dockerfile: Dockerfile
