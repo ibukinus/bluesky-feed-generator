@@ -58,6 +58,11 @@ class TestShinyColorsHandler:
         with pytest.raises(ValueError, match='Malformed cursor'):
             handler('invalid_cursor', 20)
 
+    def test_overflow_timestamp_cursor_raises_value_error(self):
+        # timestamp が time_t の範囲を超えると OverflowError になるが、ValueError に変換される
+        with pytest.raises(ValueError, match='Invalid cursor format'):
+            handler('9999999999999999999999999::cid1', 20)
+
     def test_cursor_format(self):
         Post.create(uri='at://did:plc:test/post/1', cid='cid1')
         result = handler(None, 20)

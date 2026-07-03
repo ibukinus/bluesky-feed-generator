@@ -88,3 +88,31 @@ class TestGetFeedSkeleton:
             f'/xrpc/app.bsky.feed.getFeedSkeleton?feed={config.SHINY_URI}&cursor=bad'
         )
         assert response.status_code == 400
+
+    def test_overflow_cursor_returns_400(self, client):
+        from server import config
+        cursor = '9' * 25 + '::cid1'
+        response = client.get(
+            f'/xrpc/app.bsky.feed.getFeedSkeleton?feed={config.SHINY_URI}&cursor={cursor}'
+        )
+        assert response.status_code == 400
+
+    def test_limit_clamped_to_100(self, client):
+        from server import config
+        for i in range(105):
+            Post.create(uri=f'at://did:plc:test/post/{i}', cid=f'cid{i:03d}')
+        response = client.get(
+            f'/xrpc/app.bsky.feed.getFeedSkeleton?feed={config.SHINY_URI}&limit=100000'
+        )
+        assert response.status_code == 200
+        assert len(response.get_json()['feed']) == 100
+
+    def test_limit_clamped_to_minimum_1(self, client):
+        from server import config
+        for i in range(5):
+            Post.create(uri=f'at://did:plc:test/post/{i}', cid=f'cid{i}')
+        response = client.get(
+            f'/xrpc/app.bsky.feed.getFeedSkeleton?feed={config.SHINY_URI}&limit=0'
+        )
+        assert response.status_code == 200
+        assert len(response.get_json()['feed']) == 1

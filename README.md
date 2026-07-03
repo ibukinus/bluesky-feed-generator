@@ -47,6 +47,7 @@ cp .env.example .env
 | `HOSTNAME` | did:web 解決用のドメイン名 | Yes |
 | `SHINY_URI` | フィード URI（公開後に取得） | Yes |
 | `SERVICE_DID` | カスタム DID（デフォルト: `did:web:{HOSTNAME}`） | No |
+| `FEEDGEN_SQLITE_LOCATION` | SQLite DB の保存先（デフォルト: `feed.db`）。Docker 運用では `db/feed.db` を明示しないとコンテナ再作成で DB が消える | No |
 | `EXCLUDED_DID` | 除外する DID（セミコロン区切り） | No |
 | `PRIORITY_DID` | 優先する DID（セミコロン区切り） | No |
 | `IGNORE_ARCHIVED_POSTS` | Twitter/X からのインポート投稿を除外 | No |

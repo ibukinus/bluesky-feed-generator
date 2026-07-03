@@ -14,8 +14,9 @@ if "rank1" in keyword:
 if "rank2" in keyword:
     rank2 = keyword.get("rank2")
 
-rank1_regex = re.compile("^" + "$|^".join(rank1) + "$", re.IGNORECASE)
-rank2_regex = re.compile("^" + "$|^".join(rank2) + "$", re.IGNORECASE)
+# キーワードは文字どおりに解釈する（`.` や `+` を含む曲名などが正規表現として機能しないよう re.escape する）
+rank1_regex = re.compile("^" + "$|^".join(map(re.escape, rank1)) + "$", re.IGNORECASE)
+rank2_regex = re.compile("^" + "$|^".join(map(re.escape, rank2)) + "$", re.IGNORECASE)
 
 def match_shiny_colors(text: str) -> bool:
     """与えられた文章にシャニマスに関連するワードが含まれるか検査します。
