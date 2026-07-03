@@ -67,6 +67,7 @@ Flask (app.py)
 - **Dockerfile**: マルチステージビルド。builder ステージで uv sync（frozen）+ `scripts/build_user_dict.py`（Sudachi ユーザー辞書ビルドと `sudachi.json` の配置）を実行し、runner は slim イメージに site-packages をコピーして gunicorn で `0.0.0.0:8000` を公開する。
 - **compose.yml**: GHCR のイメージ（`ghcr.io/ibukinus/bluesky-feed-generator:latest`）を使用。`./db` を `/app/db` にマウント、`.env` を読み込み、ポート 8000 を公開。
 - **CI/CD（GitHub Actions）**: PR で `ci.yml` がテストを実行。`shiny` への push で `deploy.yml` が テスト → イメージビルド → GHCR への push → SSH 経由で VM の `docker compose pull && up -d` を実行する。必要なシークレットは README を参照。
+- **イメージは linux/arm64 のみ。** デプロイ先の OCI VM が ARM のため、ARM ランナー（`ubuntu-24.04-arm`）でネイティブビルドする（QEMU エミュレーションはビルドが遅くなるため使わない）。
 - ローカル開発は `uv sync` + `flask --debug run`（`.flaskenv` で port 8000）。
 
 ## 設計上の注意点（恒久的な制約）

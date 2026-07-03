@@ -85,6 +85,7 @@ docker compose up
 ```
 
 - CI が push した GHCR イメージ（`ghcr.io/ibukinus/bluesky-feed-generator:latest`）を使用（ローカルでビルドする場合は `docker compose build`）
+- GHCR イメージは **linux/arm64 のみ**（デプロイ先の OCI VM と Apple Silicon Mac に対応）。x86_64 ホストでは `docker compose build` でローカルビルドすること
 - gunicorn で `0.0.0.0:8000` にバインド
 - `./db` をボリュームマウントして DB を永続化（`.env` に `FEEDGEN_SQLITE_LOCATION=db/feed.db` を明示すること）
 - `.env` から環境変数を読み込み
