@@ -1,4 +1,4 @@
-import sys
+import os
 import signal
 import threading
 
@@ -19,13 +19,18 @@ stream_thread = threading.Thread(
 stream_thread.start()
 
 
-def sigint_handler(*_):
+def shutdown_handler(*_):
     print('Stopping data stream...')
     stream_stop_event.set()
-    sys.exit(0)
+    # 停止イベントは次のメッセージ受信時にしか観測されないため、
+    # ネットワーク断などで観測されない場合に備えて猶予付きで待ってから強制終了する
+    stream_thread.join(timeout=5)
+    os._exit(0)
 
 
-signal.signal(signal.SIGINT, sigint_handler)
+signal.signal(signal.SIGINT, shutdown_handler)
+# docker compose down や gunicorn の再起動は SIGTERM を送るため、SIGINT と同様に扱う
+signal.signal(signal.SIGTERM, shutdown_handler)
 
 
 @app.route('/')
@@ -83,6 +88,8 @@ def get_feed_skeleton():
     try:
         cursor = request.args.get('cursor', default=None, type=str)
         limit = request.args.get('limit', default=20, type=int)
+        # AT Protocol の仕様（1〜100）に合わせてクランプする
+        limit = max(1, min(limit, 100))
         body = algo(cursor, limit)
     except ValueError:
         return 'Malformed cursor', 400

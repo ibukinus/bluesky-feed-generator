@@ -1,4 +1,4 @@
-from server.matcher import match_shiny_colors
+from server.matcher import match_shiny_colors, rank1, rank2, rank1_regex
 
 
 class TestMatchShinyColorsRank1:
@@ -53,3 +53,18 @@ class TestMatchShinyColorsNoMatch:
 
     def test_only_common_words(self):
         assert match_shiny_colors("東京で買い物をした") is False
+
+
+class TestKeywordEscaping:
+    """キーワードが正規表現として解釈されず文字どおりマッチすることのテスト"""
+
+    def test_metachar_keyword_matches_literally(self):
+        assert rank1_regex.match("w.i.n.g.")
+
+    def test_dot_is_not_wildcard(self):
+        # re.escape 導入前は「W.I.N.G.」の `.` が任意の1文字にマッチしていた
+        assert rank1_regex.match("wxixnxgx") is None
+
+    def test_no_manual_escape_in_keywords(self):
+        # keyword.toml に手動エスケープの `\` を混入させない（文字として解釈されマッチしなくなる）
+        assert not any("\\" in word for word in rank1 + rank2)
