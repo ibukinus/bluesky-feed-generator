@@ -1,0 +1,79 @@
+# shiny への push で テスト → イメージビルド → GHCR へ push → OCI VM へデプロイ。
+# デプロイには以下のリポジトリシークレットが必要（未設定の場合 deploy ジョブは失敗する）:
+#   DEPLOY_SSH_HOST … VM のホスト名 / IP
+#   DEPLOY_SSH_USER … SSH ユーザー名
+#   DEPLOY_SSH_KEY  … SSH 秘密鍵（PEM）
+#   DEPLOY_APP_DIR  … VM 上の compose.yml と .env を置いたディレクトリ
+name: Deploy
+
+on:
+  push:
+    branches: [shiny]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: uv をセットアップ
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      - name: 依存関係をインストール
+        run: uv sync --frozen
+
+      - name: テストを実行
+        run: uv run pytest
+
+  build-and-push:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: GHCR にログイン
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: イメージをビルドして push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: VM 上で新イメージに入れ替え
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_SSH_HOST }}
+          username: ${{ secrets.DEPLOY_SSH_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            cd "${{ secrets.DEPLOY_APP_DIR }}"
+            docker compose pull app
+            docker compose up -d app
+            docker image prune -f

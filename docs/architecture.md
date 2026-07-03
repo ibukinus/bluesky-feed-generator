@@ -64,13 +64,14 @@ Flask (app.py)
 
 ## デプロイ構成
 
-- **Dockerfile**: マルチステージビルド。builder ステージで uv sync（frozen）+ Sudachi ユーザー辞書ビルド（`sudachipy ubuild`）+ `sudachi.json` の配置を行い、runner は slim イメージに site-packages をコピーして gunicorn で `0.0.0.0:8000` を公開する。
-- **compose.yml**: `./db` を `/app/db` にマウント、`.env` を読み込み、ポート 8000 を公開。
+- **Dockerfile**: マルチステージビルド。builder ステージで uv sync（frozen）+ `scripts/build_user_dict.py`（Sudachi ユーザー辞書ビルドと `sudachi.json` の配置）を実行し、runner は slim イメージに site-packages をコピーして gunicorn で `0.0.0.0:8000` を公開する。
+- **compose.yml**: GHCR のイメージ（`ghcr.io/ibukinus/bluesky-feed-generator:latest`）を使用。`./db` を `/app/db` にマウント、`.env` を読み込み、ポート 8000 を公開。
+- **CI/CD（GitHub Actions）**: PR で `ci.yml` がテストを実行。`shiny` への push で `deploy.yml` が テスト → イメージビルド → GHCR への push → SSH 経由で VM の `docker compose pull && up -d` を実行する。必要なシークレットは README を参照。
 - ローカル開発は `uv sync` + `flask --debug run`（`.flaskenv` で port 8000）。
 
 ## 設計上の注意点（恒久的な制約）
 
-- **Sudachi ユーザー辞書は Docker ビルド時のみ組み込まれる。** ローカル実行や pytest はシステム辞書のみで動作するため、正規化依存のマッチング結果が本番と異なる場合がある。
+- **Sudachi ユーザー辞書は `scripts/build_user_dict.py` で sudachipy の resources ディレクトリに組み込む。** Docker ビルドと pytest（conftest.py）は自動実行するため、テストは本番と同じ辞書で走る。素の `flask run` で辞書を使うには事前に同スクリプトを実行する。
 - **SQLite の保存先はデフォルトで `feed.db`（コンテナ内 `/app/feed.db`）。** compose のボリュームマウント（`/app/db`）の外にあるため、Docker 運用では `.env` で `FEEDGEN_SQLITE_LOCATION=db/feed.db` を明示しないと再作成時に DB が消える。
 - **gunicorn は1ワーカー前提。** Firehose 購読スレッドは import 時に起動するため、ワーカーを増やすと購読が重複する。
 - 収集した投稿に保持期限はなく、DB は単調増加する。

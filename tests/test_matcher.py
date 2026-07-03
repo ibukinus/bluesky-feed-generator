@@ -68,3 +68,33 @@ class TestKeywordEscaping:
     def test_no_manual_escape_in_keywords(self):
         # keyword.toml に手動エスケープの `\` を混入させない（文字として解釈されマッチしなくなる）
         assert not any("\\" in word for word in rank1 + rank2)
+
+
+class TestUserDictionary:
+    """ユーザー辞書（user.csv）による正規化のテスト。
+
+    conftest.py が scripts/build_user_dict.py で辞書を組み込むため、
+    本番（Docker）と同じマッチング挙動をローカルでも検証できる。
+    """
+
+    def test_english_alias_normalized(self):
+        # user.csv: shiny colors → シャイニーカラーズ（rank1）
+        assert match_shiny_colors("shiny colorsのイベントに参加した") is True
+
+    def test_multi_word_song_title(self):
+        # user.csv がないと複数語の楽曲名は1トークンにならずマッチしない
+        assert match_shiny_colors("dye the sky.を聴いた") is True
+
+
+class TestKeywordTomlValidation:
+    """keyword.toml のバリデーション（CI で検証される）"""
+
+    def test_no_duplicates(self):
+        # マッチングは IGNORECASE のため小文字化して比較する
+        lowered1 = [word.lower() for word in rank1]
+        lowered2 = [word.lower() for word in rank2]
+        assert len(lowered1) == len(set(lowered1))
+        assert len(lowered2) == len(set(lowered2))
+
+    def test_no_overlap_between_ranks(self):
+        assert not {word.lower() for word in rank1} & {word.lower() for word in rank2}

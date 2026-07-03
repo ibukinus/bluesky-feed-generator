@@ -16,10 +16,8 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 COPY sudachi.json user.csv ./
-RUN DICT_DIR=$(uv run python -c "import sudachidict_core; import os; print(os.path.join(os.path.dirname(sudachidict_core.__file__), 'resources', 'system.dic'))") && \
-    SUDACHI_DIR=$(uv run python -c "import sudachipy; import os; print(os.path.join(os.path.dirname(sudachipy.__file__), 'resources'))") && \
-    uv run sudachipy ubuild -o "$SUDACHI_DIR/user.dic" -s "$DICT_DIR" user.csv && \
-    cp sudachi.json "$SUDACHI_DIR/"
+COPY scripts/build_user_dict.py scripts/
+RUN uv run python scripts/build_user_dict.py
 
 FROM python:3.11-slim AS runner
 
