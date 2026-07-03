@@ -15,3 +15,4 @@
 ## レポート一覧
 
 - [2026-07-03 プロジェクト全体分析](reports/2026-07-03-project-analysis.md)
+- [2026-07-03 追加課題調査](reports/2026-07-03-additional-issues.md)
