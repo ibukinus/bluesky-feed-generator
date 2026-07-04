@@ -16,3 +16,8 @@
 
 - [2026-07-03 プロジェクト全体分析](reports/2026-07-03-project-analysis.md)
 - [2026-07-03 追加課題調査](reports/2026-07-03-additional-issues.md)
+- [2026-07-03 刷新方針の検討](reports/2026-07-03-renewal-assessment.md)
+
+## ADR 一覧
+
+- [0001 Jetstream 移行と ingest/serve プロセス分離](adr/0001-jetstream-移行とプロセス分離.md)

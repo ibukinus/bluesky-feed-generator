@@ -1,4 +1,5 @@
 services:
+  # 配信 API（Flask / gunicorn）
   app:
     # CI がビルドして push したイメージを pull して使う（ローカルビルドは docker compose build）
     image: ghcr.io/ibukinus/bluesky-feed-generator:latest
@@ -8,5 +9,20 @@ services:
     volumes:
       - ./db:/app/db
     env_file: .env
+    environment:
+      # app と ingest が同じ DB を共有するよう、ボリューム内のパスをデフォルトにする（.env で上書き可）
+      FEEDGEN_SQLITE_LOCATION: ${FEEDGEN_SQLITE_LOCATION:-db/feed.db}
     ports:
       - 8000:8000
+    restart: unless-stopped
+
+  # Jetstream 購読・投稿収集（app と同じイメージでコマンドのみ変更）
+  ingest:
+    image: ghcr.io/ibukinus/bluesky-feed-generator:latest
+    command: python -m server.ingest
+    volumes:
+      - ./db:/app/db
+    env_file: .env
+    environment:
+      FEEDGEN_SQLITE_LOCATION: ${FEEDGEN_SQLITE_LOCATION:-db/feed.db}
+    restart: unless-stopped

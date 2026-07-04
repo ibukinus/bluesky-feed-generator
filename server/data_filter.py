@@ -111,5 +111,9 @@ def operations_callback(ops: defaultdict) -> None:
     if posts_to_create:
         with db.atomic():
             for post_dict in posts_to_create:
+                # Jetstream 再接続時のカーソル巻き戻しで同じ投稿が再送されるため、
+                # 登録済み URI はスキップする
+                if Post.select().where(Post.uri == post_dict['uri']).exists():
+                    continue
                 Post.create(**post_dict)
         logger.debug(f'Added to feed: {len(posts_to_create)}')

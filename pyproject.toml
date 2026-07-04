@@ -10,6 +10,7 @@ dependencies = [
     "SudachiPy==0.6.7",
     "SudachiDict-core==20230927",
     "python-dotenv>=1.0.0",
+    "websockets>=15.0.1",
 ]
 
 [tool.hatch.build.targets.wheel]

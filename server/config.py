@@ -28,6 +28,30 @@ if SHINY_URI is None:
 
 FEEDGEN_SQLITE_LOCATION = os.environ.get('FEEDGEN_SQLITE_LOCATION', 'feed.db')
 
+JETSTREAM_ENDPOINT = os.environ.get(
+    'JETSTREAM_ENDPOINT', 'wss://jetstream2.us-east.bsky.network/subscribe'
+)
+
+def _parse_retention_days(value: str) -> int:
+    try:
+        days = int(value)
+    except ValueError:
+        raise RuntimeError(
+            f'"FEEDGEN_POST_RETENTION_DAYS" must be an integer, got: {value!r}'
+        )
+    # 負値は削除しきい値が未来になり全投稿が削除されてしまうため拒否する
+    if days < 0:
+        raise RuntimeError(
+            f'"FEEDGEN_POST_RETENTION_DAYS" must be 0 or positive, got: {value!r}'
+        )
+    return days
+
+
+# 収集した投稿の保持日数。0 で無期限。
+POST_RETENTION_DAYS = _parse_retention_days(
+    os.environ.get('FEEDGEN_POST_RETENTION_DAYS', '30')
+)
+
 EXCLUDED_DID = os.environ.get('EXCLUDED_DID', '')
 EXCLUDED_DID_LIST = [did for did in EXCLUDED_DID.split(';') if did.strip()]
 
