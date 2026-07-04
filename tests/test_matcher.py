@@ -1,4 +1,4 @@
-from server.matcher import match_shiny_colors, rank1, rank2, rank1_regex
+from server.matcher import match_shiny_colors, rank1, rank1_surface, rank2, rank1_regex
 
 
 class TestMatchShinyColorsRank1:
@@ -67,7 +67,29 @@ class TestKeywordEscaping:
 
     def test_no_manual_escape_in_keywords(self):
         # keyword.toml に手動エスケープの `\` を混入させない（文字として解釈されマッチしなくなる）
-        assert not any("\\" in word for word in rank1 + rank2)
+        assert not any("\\" in word for word in rank1 + rank2 + rank1_surface)
+
+
+class TestSurfaceMatch:
+    """表面形マッチ層（rank1_surface）のテスト。
+
+    Sudachi の正規化形マッチでは誤検出する語（seeds → シーズ）を、
+    書かれたままの表面形で判定する。
+    """
+
+    def test_surface_form_matches(self):
+        assert match_shiny_colors("シーズの新曲が出た") is True
+
+    def test_alias_surface_matches(self):
+        assert match_shiny_colors("SHHisの新曲が出た") is True
+
+    def test_normalized_collision_not_matched(self):
+        # "seeds" の正規化形は「シーズ」だが、表面形が異なるため拾わない
+        assert match_shiny_colors("seedsを植えた") is False
+        assert match_shiny_colors("Seedsが発芽した") is False
+
+    def test_similar_word_not_matched(self):
+        assert match_shiny_colors("シーズンの変わり目") is False
 
 
 class TestUserDictionary:
@@ -91,10 +113,14 @@ class TestKeywordTomlValidation:
 
     def test_no_duplicates(self):
         # マッチングは IGNORECASE のため小文字化して比較する
-        lowered1 = [word.lower() for word in rank1]
-        lowered2 = [word.lower() for word in rank2]
-        assert len(lowered1) == len(set(lowered1))
-        assert len(lowered2) == len(set(lowered2))
+        for words in (rank1, rank2, rank1_surface):
+            lowered = [word.lower() for word in words]
+            assert len(lowered) == len(set(lowered))
 
     def test_no_overlap_between_ranks(self):
-        assert not {word.lower() for word in rank1} & {word.lower() for word in rank2}
+        lowered1 = {word.lower() for word in rank1}
+        lowered2 = {word.lower() for word in rank2}
+        lowered_surface = {word.lower() for word in rank1_surface}
+        assert not lowered1 & lowered2
+        assert not lowered1 & lowered_surface
+        assert not lowered2 & lowered_surface
