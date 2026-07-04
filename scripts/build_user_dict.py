@@ -32,12 +32,19 @@ def build_user_dict() -> None:
     if up_to_date:
         return
 
+    # sudachipy ubuild は既存ファイルへの上書きを拒否する（そのくせ終了コードは 0 のため
+    # check=True では検出できない）。一時ファイルへビルドし、成功したときだけ置き換えることで、
+    # ビルド失敗時に動作中の辞書を失わないようにする。
+    tmp_dic = user_dic.with_name(user_dic.name + ".tmp")
+    tmp_dic.unlink(missing_ok=True)
+
     # sudachipy CLI は実行中の Python と同じ環境のものを使う
     ubuild = Path(sys.executable).with_name("sudachipy")
     subprocess.run(
-        [str(ubuild), "ubuild", "-o", str(user_dic), "-s", str(system_dic), str(user_csv)],
+        [str(ubuild), "ubuild", "-o", str(tmp_dic), "-s", str(system_dic), str(user_csv)],
         check=True,
     )
+    tmp_dic.replace(user_dic)
     shutil.copy(repo_json, installed_json)
     print(f"Sudachi ユーザー辞書をビルドしました: {user_dic}")
 
