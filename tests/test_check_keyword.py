@@ -4,7 +4,9 @@ import pytest
 
 from scripts.check_keyword import (
     KEYWORD_TOML,
+    alias_makes_add_redundant,
     build_user_csv_row,
+    covering_alias,
     diagnose,
     insert_keyword_line,
     kana_reading,
@@ -94,6 +96,49 @@ class TestInsertKeywordLine:
         result = insert_keyword_line(real, "テスト用の語", "rank1_surface")
         parsed = tomllib.loads(result)
         assert "テスト用の語" in parsed["rank1_surface"]
+
+
+class TestCoveringAlias:
+    """既存キーワードへ正規化される別表記の検出（--add の冗長追記防止に使う）"""
+
+    @staticmethod
+    def run(word):
+        from server import matcher
+
+        keywords = tomllib.loads(KEYWORD_TOML.read_text())
+        return covering_alias(word, keywords, matcher.tokenizer)
+
+    def test_alias_returns_normalized_target(self):
+        assert self.run("shiny colors") == "シャイニーカラーズ"
+
+    def test_canonical_keyword_is_not_alias(self):
+        # 正規化形が自分自身の登録キーワードは別表記ではない
+        assert self.run("シャニマス") is None
+
+    def test_unrelated_word(self):
+        assert self.run("東京") is None
+
+    def test_multi_token_word(self):
+        assert self.run("完全に無関係な新曲名") is None
+
+
+class TestAliasMakesAddRedundant:
+    """別表記があるときに rank への追加をスキップすべきかの判定"""
+
+    KEYWORDS = {"rank1": ["シャイニーカラーズ"], "rank2": ["真乃"], "rank1_surface": []}
+
+    def test_normalized_rank_add_is_always_redundant(self):
+        # rank1/rank2 は正規化形マッチのため、別表記自身のエントリは発火しない
+        assert alias_makes_add_redundant("rank1", "シャイニーカラーズ", self.KEYWORDS)
+        assert alias_makes_add_redundant("rank2", "真乃", self.KEYWORDS)
+
+    def test_surface_add_for_rank1_alias_is_redundant(self):
+        # 正規化先が rank1 なら既に単独採用されるため表面形エントリも不要
+        assert alias_makes_add_redundant("rank1_surface", "シャイニーカラーズ", self.KEYWORDS)
+
+    def test_surface_add_for_rank2_alias_is_meaningful(self):
+        # 正規化先が rank2 だと単独では採用されないため、表面形での追加には意味がある
+        assert not alias_makes_add_redundant("rank1_surface", "真乃", self.KEYWORDS)
 
 
 class TestDiagnose:

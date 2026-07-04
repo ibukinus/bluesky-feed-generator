@@ -96,6 +96,38 @@ def registered_rank(word: str, keywords: dict[str, list[str]]) -> str | None:
     return None
 
 
+def covering_alias(word: str, keywords_toml: dict, tokenizer) -> str | None:
+    """user.csv の正規化により既存キーワードとして採用される語なら、その正規化先を返す。
+
+    例: shiny colors → シャイニーカラーズ（rank1 登録済み）。この場合 keyword.toml へ
+    追加しても正規化形と一致せず発火しない死にエントリになるため、追加は不要。
+    """
+    lowered = word.lower()
+    known = {w.lower() for w in keywords_toml.get("rank1", []) + keywords_toml.get("rank2", [])}
+    result: set[str] | None = None
+    for text in (word, f"{word}が好きです"):
+        hits = {
+            t.normalized_form().lower()
+            for t in tokenizer.tokenize(text)
+            if t.surface().lower() == lowered and t.normalized_form().lower() in known
+        } - {lowered}
+        result = hits if result is None else result & hits
+    return next(iter(result or ()), None)
+
+
+def alias_makes_add_redundant(rank: str, alias: str, keywords_toml: dict) -> bool:
+    """既存キーワードへ正規化される別表記について、rank への追加が死にエントリになるか。
+
+    rank1 / rank2（正規化形マッチ層）への追加は、トークンの正規化形が別表記自身に
+    ならないため常に不要。rank1_surface（表面形マッチ層）は、正規化先が rank1 なら
+    既に単独採用されるため不要だが、正規化先が rank2 の場合は単独では採用されない
+    ため、表面形エントリとして追加する意味がある。
+    """
+    if rank != "rank1_surface":
+        return True
+    return alias in {w.lower() for w in keywords_toml.get("rank1", [])}
+
+
 def diagnose(word: str, registered: str | None, keywords_toml: dict, tokenizer, match_fn) -> dict:
     """語が1トークンで認識されるかを検査し、結果を表示して返す。"""
     print(f"\n=== 「{word}」 ===")
@@ -103,26 +135,17 @@ def diagnose(word: str, registered: str | None, keywords_toml: dict, tokenizer, 
 
     lowered = word.lower()
     rank1_set = {w.lower() for w in keywords_toml.get("rank1", [])}
-    rank2_set = {w.lower() for w in keywords_toml.get("rank2", [])}
     texts = [word, f"{word}が好きです"]
     normalized_ok = True
     surface_ok = True
-    alias_norms: set[str] | None = None
     for text in texts:
         tokens = tokenizer.tokenize(text)
         normalized_ok &= any(t.normalized_form().lower() == lowered for t in tokens)
         surface_ok &= any(t.surface().lower() == lowered for t in tokens)
-        # user.csv により既存キーワードへ正規化される別表記（例: shiny colors → シャイニーカラーズ）
-        hits = {
-            t.normalized_form().lower()
-            for t in tokens
-            if t.surface().lower() == lowered
-            and t.normalized_form().lower() in (rank1_set | rank2_set)
-        } - {lowered}
-        alias_norms = hits if alias_norms is None else alias_norms & hits
         breakdown = " / ".join(f"{t.surface()}→{t.normalized_form()}" for t in tokens)
         print(f"  分割「{text}」: {breakdown}")
-    alias_target = next(iter(alias_norms or ()), None)
+    # user.csv により既存キーワードへ正規化される別表記（例: shiny colors → シャイニーカラーズ）
+    alias_target = covering_alias(word, keywords_toml, tokenizer)
 
     # rank1_surface は表面形、それ以外（未登録含む）は正規化形か既存キーワードへの正規化で認識される
     recognized = surface_ok if registered == "rank1_surface" else (normalized_ok or alias_target is not None)
@@ -181,22 +204,37 @@ def main(argv: list[str] | None = None) -> int:
     os.chdir(REPO_ROOT)
 
     keywords_toml = tomllib.loads(KEYWORD_TOML.read_text())
+
+    # --add の別表記チェックと matcher の両方が使うため、先に辞書をビルドする
+    from scripts.build_user_dict import build_user_dict
+
+    build_user_dict()
+
     if args.add:
+        # matcher は import 時に追記後の keyword.toml を読む必要があるため、
+        # 追記前のチェックには独自にロードしたトークナイザーを使う
+        from sudachipy import dictionary
+
+        pre_tokenizer = dictionary.Dictionary().create()
         toml_text = KEYWORD_TOML.read_text()
         for word in args.keywords:
             rank = registered_rank(word, keywords_toml)
             if rank:
                 print(f"「{word}」は {rank} に登録済みのため追記をスキップします")
                 continue
+            alias = covering_alias(word, keywords_toml, pre_tokenizer)
+            if alias and alias_makes_add_redundant(args.add, alias, keywords_toml):
+                print(
+                    f"「{word}」は user.csv により既存キーワード「{alias}」へ正規化され採用されるため、"
+                    "keyword.toml への追記をスキップします"
+                )
+                continue
             toml_text = insert_keyword_line(toml_text, word, args.add)
             keywords_toml = tomllib.loads(toml_text)  # 構文検証を兼ねる
             print(f"keyword.toml の {args.add} に「{word}」を追記しました")
         KEYWORD_TOML.write_text(toml_text)
 
-    # matcher は import 時に keyword.toml と Sudachi 辞書を読むため、辞書ビルド後に import する
-    from scripts.build_user_dict import build_user_dict
-
-    build_user_dict()
+    # matcher は import 時に keyword.toml を読むため、追記後に import する
     from server import matcher
 
     results = [
