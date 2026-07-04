@@ -77,6 +77,6 @@ Flask (app.py) ← 配信専用（import 時副作用なし）
 ## 設計上の注意点（恒久的な制約）
 
 - **Sudachi ユーザー辞書は `scripts/build_user_dict.py` で sudachipy の resources ディレクトリに組み込む。** Docker ビルドと pytest（conftest.py）は自動実行するため、テストは本番と同じ辞書で走る。素の `flask run` で辞書を使うには事前に同スクリプトを実行する。
-- **SQLite の保存先はデフォルトで `feed.db`（コンテナ内 `/app/feed.db`）。** compose のボリュームマウント（`/app/db`）の外にあるため、Docker 運用では `.env` で `FEEDGEN_SQLITE_LOCATION=db/feed.db` を明示しないと再作成時に DB が消える。
+- **SQLite の保存先はデフォルトで `feed.db`（コンテナ内 `/app/feed.db`）。** これはボリュームマウント（`/app/db`）の外かつコンテナごとに別ファイルになるため、compose.yml が両サービスに `FEEDGEN_SQLITE_LOCATION=db/feed.db` をデフォルト設定している（`.env` で上書き可）。compose を使わず Docker を直接実行する場合はこの変数を必ず設定すること。
 - **SQLite は WAL モードで2プロセス共有。** ingest（書き込み）と app（読み取り）が同じ DB ファイルを使う。購読が別プロセスになったため gunicorn のワーカー数は増やせる（デフォルト1）。
 - **ingest は必ず1プロセスのみ。** 複数起動すると購読とカーソル管理が競合する。

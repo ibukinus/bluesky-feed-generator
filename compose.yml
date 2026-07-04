@@ -9,6 +9,9 @@ services:
     volumes:
       - ./db:/app/db
     env_file: .env
+    environment:
+      # app と ingest が同じ DB を共有するよう、ボリューム内のパスをデフォルトにする（.env で上書き可）
+      FEEDGEN_SQLITE_LOCATION: ${FEEDGEN_SQLITE_LOCATION:-db/feed.db}
     ports:
       - 8000:8000
     restart: unless-stopped
@@ -20,4 +23,6 @@ services:
     volumes:
       - ./db:/app/db
     env_file: .env
+    environment:
+      FEEDGEN_SQLITE_LOCATION: ${FEEDGEN_SQLITE_LOCATION:-db/feed.db}
     restart: unless-stopped

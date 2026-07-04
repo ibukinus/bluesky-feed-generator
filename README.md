@@ -48,7 +48,7 @@ cp .env.example .env
 | `HOSTNAME` | did:web 解決用のドメイン名 | Yes |
 | `SHINY_URI` | フィード URI（公開後に取得） | Yes |
 | `SERVICE_DID` | カスタム DID（デフォルト: `did:web:{HOSTNAME}`） | No |
-| `FEEDGEN_SQLITE_LOCATION` | SQLite DB の保存先（デフォルト: `feed.db`）。Docker 運用では `db/feed.db` を明示しないとコンテナ再作成で DB が消える | No |
+| `FEEDGEN_SQLITE_LOCATION` | SQLite DB の保存先（デフォルト: `feed.db`。compose 実行時は両サービス共有の `db/feed.db` が自動設定される） | No |
 | `JETSTREAM_ENDPOINT` | Jetstream の WebSocket URL（デフォルト: `wss://jetstream2.us-east.bsky.network/subscribe`） | No |
 | `FEEDGEN_POST_RETENTION_DAYS` | 投稿の保持日数（デフォルト: `30`、`0` で無期限） | No |
 | `EXCLUDED_DID` | 除外する DID（セミコロン区切り） | No |
@@ -89,7 +89,7 @@ docker compose up
 - 2つのサービスが起動する: `app`（配信 API、gunicorn で `0.0.0.0:8000`）と `ingest`（Jetstream 購読・投稿収集）。同じイメージを共有する
 - CI が push した GHCR イメージ（`ghcr.io/ibukinus/bluesky-feed-generator:latest`）を使用（ローカルでビルドする場合は `docker compose build`）
 - GHCR イメージは **linux/arm64 のみ**（デプロイ先の OCI VM と Apple Silicon Mac に対応）。x86_64 ホストでは `docker compose build` でローカルビルドすること
-- `./db` をボリュームマウントして DB を永続化（`.env` に `FEEDGEN_SQLITE_LOCATION=db/feed.db` を明示すること）
+- `./db` をボリュームマウントして DB を永続化（compose が `FEEDGEN_SQLITE_LOCATION=db/feed.db` を自動設定し、app と ingest が同じ DB を共有する）
 - `.env` から環境変数を読み込み
 
 ### デプロイ（CI/CD）

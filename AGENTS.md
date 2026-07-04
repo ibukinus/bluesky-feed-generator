@@ -43,7 +43,7 @@ uv run python publish_feed.py  # フィードレコードの公開/更新
 ## 環境差の罠
 
 - **Sudachi ユーザー辞書（user.csv）は `scripts/build_user_dict.py` で venv 内の sudachipy に組み込む。** pytest（conftest.py）と Docker ビルドは自動実行する。`uv sync` で venv を作り直すと辞書は消えるが、次回の pytest かスクリプト実行で再ビルドされる。`flask run` で辞書を使う場合は先にスクリプトを実行すること。
-- **Docker 運用では `.env` に `FEEDGEN_SQLITE_LOCATION=db/feed.db` を明示する。** デフォルトの `feed.db` はボリュームマウント外で、コンテナ再作成時に消える。
+- **SQLite の保存先はコンテナ間で共有されない `feed.db` がデフォルト。** compose.yml が両サービスに `db/feed.db`（ボリューム内・共有）をデフォルト設定しているため通常は問題ないが、compose を使わず実行する場合は `FEEDGEN_SQLITE_LOCATION` を必ず設定する。
 - **ingest は必ず1プロセスのみ。** 複数起動すると購読とカーソル管理が競合する（gunicorn のワーカー数は購読と無関係になったため増やしてもよい）。
 
 ## ドキュメント管理
