@@ -107,6 +107,15 @@ class TestUserDictionary:
         # user.csv がないと複数語の楽曲名は1トークンにならずマッチしない
         assert match_shiny_colors("dye the sky.を聴いた") is True
 
+    def test_normalized_form_matches_rank1_entry(self):
+        # かつて user.csv の正規化先が「borderline」（rank2）になっており、
+        # rank1 登録済みでも単独でマッチしなかった（正規化先の書き誤り）
+        assert match_shiny_colors("カウントダウンラブを聴いた") is True
+
+    def test_borderline_alone_stays_rank2(self):
+        # 上記修正で borderline 単独（rank2）の挙動は変えない
+        assert match_shiny_colors("borderlineな気分") is False
+
 
 class TestKeywordTomlValidation:
     """keyword.toml のバリデーション（CI で検証される）"""

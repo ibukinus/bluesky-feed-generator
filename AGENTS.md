@@ -16,6 +16,7 @@ flask --debug run      # 配信 API の開発サーバー起動（.flaskenv で 
 uv run python -m server.ingest  # 投稿収集プロセスの起動（配信だけ試すなら不要）
 docker compose up      # 本番相当の起動（app + ingest の2サービス）
 uv run python publish_feed.py  # フィードレコードの公開/更新
+uv run python scripts/check_keyword.py "<語>" --add rank1  # キーワード追加＋マッチ検証（--fix で user.csv も自動更新）
 ```
 
 - パッケージ管理は uv。pip や requirements.txt は使わない。依存を変更したら `uv.lock` も更新してコミットする。
@@ -34,6 +35,7 @@ uv run python publish_feed.py  # フィードレコードの公開/更新
 
 ## keyword.toml の編集ルール
 
+- 追加作業は `scripts/check_keyword.py`（または `/add-keyword` スキル）を使う。keyword.toml への追記・Sudachi 分割を経たマッチ検証・user.csv の候補行の追記・辞書再ビルド・再検証までを1コマンドで行う（使い方はスクリプトの docstring / `--help` を参照）。
 - **rank1**: 1トークンの完全一致で即採用。固有性の高い語（作品名・ユニット名・フルネーム・楽曲名）のみ追加する。一般語を入れると誤検出が急増する。
 - **rank2**: 異なる2語以上のマッチで採用。姓のみ・名のみなど単独では曖昧な語を入れる。
 - **rank1_surface**: 表面形（書かれたまま）の完全一致でのみ採用。正規化形マッチで誤検出する語（例: seeds → シーズ）をここに置く。表記ゆれは吸収されないため必要な表記は個別に列挙する。
