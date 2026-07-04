@@ -4,7 +4,12 @@ import peewee
 
 from server import config
 
-db = peewee.SqliteDatabase(config.FEEDGEN_SQLITE_LOCATION)
+# ingest（書き込み）と app（読み取り）の2プロセスが同じ DB を共有するため、
+# WAL モードで並行アクセスを許可し、ロック競合時は待機する
+db = peewee.SqliteDatabase(
+    config.FEEDGEN_SQLITE_LOCATION,
+    pragmas={'journal_mode': 'wal', 'busy_timeout': 5000},
+)
 db_version = 2
 
 class BaseModel(peewee.Model):

@@ -1,36 +1,11 @@
-import os
-import signal
-import threading
-
-from server import config
-from server import data_stream
-
 from flask import Flask, jsonify, request
 
+from server import config
 from server.algos import algos
-from server.data_filter import operations_callback
 
+# Firehose/Jetstream の購読は別プロセス（server/ingest.py）が担う。
+# このモジュールは配信 API のみを提供する。
 app = Flask(__name__)
-
-stream_stop_event = threading.Event()
-stream_thread = threading.Thread(
-    target=data_stream.run, args=(config.SERVICE_DID, operations_callback, stream_stop_event,)
-)
-stream_thread.start()
-
-
-def shutdown_handler(*_):
-    print('Stopping data stream...')
-    stream_stop_event.set()
-    # 停止イベントは次のメッセージ受信時にしか観測されないため、
-    # ネットワーク断などで観測されない場合に備えて猶予付きで待ってから強制終了する
-    stream_thread.join(timeout=5)
-    os._exit(0)
-
-
-signal.signal(signal.SIGINT, shutdown_handler)
-# docker compose down や gunicorn の再起動は SIGTERM を送るため、SIGINT と同様に扱う
-signal.signal(signal.SIGTERM, shutdown_handler)
 
 
 @app.route('/')

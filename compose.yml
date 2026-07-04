@@ -1,4 +1,5 @@
 services:
+  # 配信 API（Flask / gunicorn）
   app:
     # CI がビルドして push したイメージを pull して使う（ローカルビルドは docker compose build）
     image: ghcr.io/ibukinus/bluesky-feed-generator:latest
@@ -10,3 +11,13 @@ services:
     env_file: .env
     ports:
       - 8000:8000
+    restart: unless-stopped
+
+  # Jetstream 購読・投稿収集（app と同じイメージでコマンドのみ変更）
+  ingest:
+    image: ghcr.io/ibukinus/bluesky-feed-generator:latest
+    command: python -m server.ingest
+    volumes:
+      - ./db:/app/db
+    env_file: .env
+    restart: unless-stopped

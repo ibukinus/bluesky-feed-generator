@@ -64,6 +64,7 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "sudachidict-core" },
     { name = "sudachipy" },
+    { name = "websockets" },
 ]
 
 [package.dev-dependencies]
@@ -80,6 +81,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "sudachidict-core", specifier = "==20230927" },
     { name = "sudachipy", specifier = "==0.6.7" },
+    { name = "websockets", specifier = ">=15.0.1" },
 ]
 
 [package.metadata.requires-dev]

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Bluesky の Firehose から「シャイニーカラーズ」関連の日本語投稿を収集し、カスタムフィードとして配信する Feed Generator。詳細は [docs/architecture.md](docs/architecture.md) を参照。
+Bluesky の Jetstream から「シャイニーカラーズ」関連の日本語投稿を収集し、カスタムフィードとして配信する Feed Generator。収集（`server/ingest.py`）と配信（`server/app.py`）は別プロセス。詳細は [docs/architecture.md](docs/architecture.md) を参照。
 
 ## 言語
 
@@ -12,8 +12,9 @@ Bluesky の Firehose から「シャイニーカラーズ」関連の日本語�
 uv sync                # 依存関係のインストール
 uv run pytest          # テスト実行（全件パスを維持すること）
 uv run python scripts/build_user_dict.py  # Sudachi ユーザー辞書の組み込み（pytest / Docker は自動実行）
-flask --debug run      # 開発サーバー起動（.flaskenv で port 8000）
-docker compose up      # 本番相当の起動
+flask --debug run      # 配信 API の開発サーバー起動（.flaskenv で port 8000）
+uv run python -m server.ingest  # 投稿収集プロセスの起動（配信だけ試すなら不要）
+docker compose up      # 本番相当の起動（app + ingest の2サービス）
 uv run python publish_feed.py  # フィードレコードの公開/更新
 ```
 
@@ -27,9 +28,9 @@ uv run python publish_feed.py  # フィードレコードの公開/更新
 
 ## import 時の副作用（重要）
 
-- `server/app.py` は import した時点で Firehose 購読スレッドを起動する。
 - `server/database.py` は import した時点で DB へ接続しテーブルを作成する。
 - `server/matcher.py` は import した時点で `keyword.toml` を読み Sudachi 辞書をロードする（`keyword.toml` はカレントディレクトリ基準なのでリポジトリルートから実行すること）。
+- `server/app.py` に import 時副作用はない（購読は `python -m server.ingest` の独立プロセス）。
 
 ## keyword.toml の編集ルール
 
@@ -43,7 +44,7 @@ uv run python publish_feed.py  # フィードレコードの公開/更新
 
 - **Sudachi ユーザー辞書（user.csv）は `scripts/build_user_dict.py` で venv 内の sudachipy に組み込む。** pytest（conftest.py）と Docker ビルドは自動実行する。`uv sync` で venv を作り直すと辞書は消えるが、次回の pytest かスクリプト実行で再ビルドされる。`flask run` で辞書を使う場合は先にスクリプトを実行すること。
 - **Docker 運用では `.env` に `FEEDGEN_SQLITE_LOCATION=db/feed.db` を明示する。** デフォルトの `feed.db` はボリュームマウント外で、コンテナ再作成時に消える。
-- **gunicorn は1ワーカー前提。** ワーカーを増やすと Firehose 購読が重複するため、ワーカー数を変更しないこと。
+- **ingest は必ず1プロセスのみ。** 複数起動すると購読とカーソル管理が競合する（gunicorn のワーカー数は購読と無関係になったため増やしてもよい）。
 
 ## ドキュメント管理
 

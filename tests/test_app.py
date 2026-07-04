@@ -1,6 +1,3 @@
-import datetime
-from unittest.mock import patch, MagicMock
-
 import pytest
 
 from server.database import db, Post
@@ -8,11 +5,10 @@ from server.database import db, Post
 
 @pytest.fixture
 def client():
-    with patch('server.data_stream.run'):
-        from server.app import app
-        app.config['TESTING'] = True
-        with app.test_client() as c:
-            yield c
+    from server.app import app
+    app.config['TESTING'] = True
+    with app.test_client() as c:
+        yield c
 
 
 class TestIndex:

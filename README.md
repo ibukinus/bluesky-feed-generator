@@ -1,15 +1,15 @@
 # Bluesky シャイニーカラーズ Feed Generator
 
-Bluesky の Firehose からシャイニーカラーズ関連の投稿をリアルタイムで収集し、カスタムフィードとして配信する Feed Generator です。
+Bluesky の Jetstream からシャイニーカラーズ関連の投稿をリアルタイムで収集し、カスタムフィードとして配信する Feed Generator です。
 
 [AT Protocol SDK for Python](https://github.com/MarshalX/atproto) を使用しています。
 
 ## 仕組み
 
-1. Bluesky Firehose（全投稿のリアルタイムストリーム）を購読
+1. Bluesky Jetstream（投稿のリアルタイムストリーム）を収集プロセス（`server/ingest.py`）が購読
 2. 日本語の投稿を対象に、Sudachi 形態素解析でキーワードマッチングを実行
-3. マッチした投稿を SQLite に保存
-4. AT Protocol 標準エンドポイントを通じてフィードを配信
+3. マッチした投稿を SQLite に保存（保持期限を過ぎた投稿は自動削除）
+4. 配信プロセス（Flask）が AT Protocol 標準エンドポイントを通じてフィードを配信
 
 ### キーワードマッチング
 
@@ -26,7 +26,8 @@ Bluesky の Firehose からシャイニーカラーズ関連の投稿をリア�
 - **Flask** - API サーバー
 - **gunicorn** - WSGI サーバー
 - **atproto** - AT Protocol SDK
-- **peewee** - ORM（SQLite）
+- **websockets** - Jetstream 購読
+- **peewee** - ORM（SQLite、WAL モード）
 - **SudachiPy** - 日本語形態素解析
 - **uv** - パッケージ管理
 
@@ -48,6 +49,8 @@ cp .env.example .env
 | `SHINY_URI` | フィード URI（公開後に取得） | Yes |
 | `SERVICE_DID` | カスタム DID（デフォルト: `did:web:{HOSTNAME}`） | No |
 | `FEEDGEN_SQLITE_LOCATION` | SQLite DB の保存先（デフォルト: `feed.db`）。Docker 運用では `db/feed.db` を明示しないとコンテナ再作成で DB が消える | No |
+| `JETSTREAM_ENDPOINT` | Jetstream の WebSocket URL（デフォルト: `wss://jetstream2.us-east.bsky.network/subscribe`） | No |
+| `FEEDGEN_POST_RETENTION_DAYS` | 投稿の保持日数（デフォルト: `30`、`0` で無期限） | No |
 | `EXCLUDED_DID` | 除外する DID（セミコロン区切り） | No |
 | `PRIORITY_DID` | 優先する DID（セミコロン区切り） | No |
 | `IGNORE_ARCHIVED_POSTS` | Twitter/X からのインポート投稿を除外 | No |
@@ -71,10 +74,9 @@ cp .env.example .env
 ```shell
 uv sync
 uv run python scripts/build_user_dict.py  # Sudachi ユーザー辞書の組み込み（初回と user.csv 更新時）
-flask --debug run
+flask --debug run                         # 配信 API（http://127.0.0.1:8000）
+uv run python -m server.ingest            # 投稿収集（別ターミナルで。配信だけ試すなら不要）
 ```
-
-サーバーは `http://127.0.0.1:8000` で起動します。
 
 pytest 実行時は `conftest.py` が辞書ビルドを自動で行うため、手動実行は不要です。
 
@@ -84,9 +86,9 @@ pytest 実行時は `conftest.py` が辞書ビルドを自動で行うため、�
 docker compose up
 ```
 
+- 2つのサービスが起動する: `app`（配信 API、gunicorn で `0.0.0.0:8000`）と `ingest`（Jetstream 購読・投稿収集）。同じイメージを共有する
 - CI が push した GHCR イメージ（`ghcr.io/ibukinus/bluesky-feed-generator:latest`）を使用（ローカルでビルドする場合は `docker compose build`）
 - GHCR イメージは **linux/arm64 のみ**（デプロイ先の OCI VM と Apple Silicon Mac に対応）。x86_64 ホストでは `docker compose build` でローカルビルドすること
-- gunicorn で `0.0.0.0:8000` にバインド
 - `./db` をボリュームマウントして DB を永続化（`.env` に `FEEDGEN_SQLITE_LOCATION=db/feed.db` を明示すること）
 - `.env` から環境変数を読み込み
 
@@ -149,7 +151,7 @@ uv run python publish_feed.py
     ├── config.py        # 設定読み込み
     ├── logger.py        # ロギング設定
     ├── database.py      # DB モデル（Post, SubscriptionState）
-    ├── data_stream.py   # Firehose 購読
+    ├── ingest.py        # Jetstream 購読・投稿収集（独立プロセス）
     ├── data_filter.py   # フィルタリングロジック
     ├── matcher.py       # キーワードマッチングエンジン
     └── algos/

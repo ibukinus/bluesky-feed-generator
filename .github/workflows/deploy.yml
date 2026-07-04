@@ -78,6 +78,6 @@ jobs:
           script_stop: true
           script: |
             cd "${{ secrets.DEPLOY_APP_DIR }}"
-            docker compose pull app
-            docker compose up -d app
+            docker compose pull
+            docker compose up -d
             docker image prune -f
