@@ -21,3 +21,4 @@
 ## ADR 一覧
 
 - [0001 Jetstream 移行と ingest/serve プロセス分離](adr/0001-jetstream-移行とプロセス分離.md)
+- [0002 表面形マッチ層（rank1_surface）の導入](adr/0002-表面形マッチ層の導入.md)
