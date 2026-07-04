@@ -3,9 +3,19 @@ from unittest.mock import patch
 
 from atproto import models
 
+from websockets.datastructures import Headers
+from websockets.exceptions import InvalidStatus
+from websockets.http11 import Response
+
 from server.database import db, Post
 from server.data_filter import operations_callback
-from server.ingest import RECONNECT_REWIND_US, build_url, cleanup_old_posts, ops_from_event
+from server.ingest import (
+    RECONNECT_REWIND_US,
+    build_url,
+    cleanup_old_posts,
+    ops_from_event,
+    should_reset_cursor,
+)
 
 
 def make_create_event(text='シャニマスの話', langs=None, did='did:plc:author1',
@@ -115,6 +125,28 @@ class TestBuildUrl:
     def test_with_cursor_rewinds(self):
         url = build_url(10_000_000 + RECONNECT_REWIND_US)
         assert 'cursor=10000000' in url
+
+
+class TestShouldResetCursor:
+    """カーソル破棄はカーソル起因のハンドシェイク拒否（4xx）に限る"""
+
+    def _invalid_status(self, status_code):
+        return InvalidStatus(Response(status_code, 'reason', Headers()))
+
+    def test_handshake_400_resets(self):
+        assert should_reset_cursor(self._invalid_status(400)) is True
+
+    def test_rate_limit_keeps_cursor(self):
+        # 429 はカーソル起因ではないため保持する
+        assert should_reset_cursor(self._invalid_status(429)) is False
+
+    def test_handshake_5xx_keeps_cursor(self):
+        # サーバー側の一時障害ではカーソルを保持する
+        assert should_reset_cursor(self._invalid_status(503)) is False
+
+    def test_network_error_keeps_cursor(self):
+        # DNS/TCP レベルの一時障害ではカーソルを保持する
+        assert should_reset_cursor(OSError('dns failure')) is False
 
 
 class TestEventToDatabase:

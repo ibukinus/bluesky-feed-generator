@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from atproto import models
-from websockets.exceptions import WebSocketException
+from websockets.exceptions import InvalidStatus, WebSocketException
 from websockets.sync.client import connect
 
 from server import config
@@ -29,9 +29,6 @@ CURSOR_SAVE_INTERVAL_US = 5_000_000  # 約5秒ごとにカーソルを永続化
 RECONNECT_REWIND_US = 5_000_000  # 再接続時に5秒巻き戻して取りこぼしを防ぐ（重複は insert 時に排除）
 RECONNECT_DELAY_SECONDS = 5
 CLEANUP_INTERVAL_SECONDS = 3600  # 保持期限切れ投稿の削除間隔
-# 接続失敗がこの回数続いたらカーソルを破棄してライブテールから再開する
-# （リプレイ期間外の古いカーソルはハンドシェイクで拒否され得るため）
-MAX_FAILURES_BEFORE_CURSOR_RESET = 3
 
 
 def build_url(cursor: Optional[int]) -> str:
@@ -94,6 +91,17 @@ def _load_cursor() -> Optional[int]:
     return state.cursor or None
 
 
+def should_reset_cursor(exc: Exception) -> bool:
+    """接続失敗時にカーソルを破棄すべきか判定する。
+
+    Jetstream は不正なカーソルをハンドシェイクの 400 Bad Request で拒否するため、
+    その場合のみ破棄してライブテールから再開する。一時的な障害
+    （DNS/TLS/切断/429 レート制限/5xx）ではカーソルを保持し、
+    再生可能な範囲の取りこぼしを防ぐ。
+    """
+    return isinstance(exc, InvalidStatus) and exc.response.status_code == 400
+
+
 def _save_cursor(time_us: int) -> None:
     SubscriptionState.update(cursor=time_us).where(
         SubscriptionState.service == SERVICE_NAME
@@ -103,14 +111,12 @@ def _save_cursor(time_us: int) -> None:
 def run() -> None:
     cursor = _load_cursor()
     last_cleanup = 0.0
-    consecutive_failures = 0
 
     while True:
         url = build_url(cursor)
         try:
             with connect(url) as ws:
                 logger.info(f'Jetstream に接続しました: {config.JETSTREAM_ENDPOINT} (cursor={cursor})')
-                consecutive_failures = 0
                 last_saved_us = 0
                 for message in ws:
                     try:
@@ -137,14 +143,12 @@ def run() -> None:
                             last_cleanup = time.monotonic()
         except (WebSocketException, OSError) as e:
             # ハンドシェイク拒否（古いカーソル等）も含めて捕捉し、常駐プロセスを止めない
-            consecutive_failures += 1
-            if cursor and consecutive_failures >= MAX_FAILURES_BEFORE_CURSOR_RESET:
+            if cursor and should_reset_cursor(e):
                 logger.warning(
-                    f'接続失敗が{consecutive_failures}回続いたため、'
+                    f'ハンドシェイクが拒否されました: {e}。'
                     'カーソルを破棄してライブテールから再開します。'
                 )
                 cursor = None
-                consecutive_failures = 0
             logger.error(
                 f'Jetstream 接続に失敗しました: {e}。{RECONNECT_DELAY_SECONDS}秒後に再接続します。'
             )
