@@ -117,7 +117,9 @@ def run() -> None:
         try:
             with connect(url) as ws:
                 logger.info(f'Jetstream に接続しました: {config.JETSTREAM_ENDPOINT} (cursor={cursor})')
-                last_saved_us = 0
+                # 巻き戻し再生分の古い time_us を保存してカーソルが後退しないよう、
+                # 保存済みカーソルより先に進んだイベントのみを保存対象にする
+                last_saved_us = cursor or 0
                 for message in ws:
                     try:
                         event = json.loads(message)

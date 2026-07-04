@@ -107,7 +107,7 @@ docker compose up
 
 **VM 側の事前準備（初回のみ）:**
 
-1. `compose.yml` と `.env` を `DEPLOY_APP_DIR` に配置する
+1. `.env` を `DEPLOY_APP_DIR` に配置する（`compose.yml` はデプロイ時に自動配布される）
 2. GHCR のパッケージ（`ghcr.io/ibukinus/bluesky-feed-generator`）を public に設定する（private のままにする場合は VM 上で `docker login ghcr.io` を済ませておく）
 
 ## フィードの公開
