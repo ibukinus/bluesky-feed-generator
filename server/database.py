@@ -30,6 +30,12 @@ class SubscriptionState(BaseModel):
     cursor = peewee.BigIntegerField()
 
 
+class IngestMeta(BaseModel):
+    """ingest の起動をまたいで引き継ぐ文字列状態（購読ホスト等）"""
+    key = peewee.CharField(unique=True)
+    value = peewee.CharField()
+
+
 if db.is_closed():
     db.connect()
-    db.create_tables([Post, SubscriptionState])
+    db.create_tables([Post, SubscriptionState, IngestMeta])

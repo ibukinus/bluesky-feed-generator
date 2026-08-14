@@ -17,6 +17,7 @@ uv run python -m server.ingest  # 投稿収集プロセスの起動（配信だ�
 docker compose up      # 本番相当の起動（app + ingest の2サービス）
 uv run python publish_feed.py  # フィードレコードの公開/更新
 uv run python scripts/check_keyword.py "<語>" --add rank1  # キーワード追加＋マッチ検証（--fix で user.csv も自動更新）
+uv run python scripts/rewind_cursor.py --hours 7  # Jetstream カーソルの巻き戻し（購読ホスト切り替え時）
 ```
 
 - パッケージ管理は uv。pip や requirements.txt は使わない。依存を変更したら `uv.lock` も更新してコミットする。

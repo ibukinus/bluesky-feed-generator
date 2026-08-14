@@ -50,12 +50,25 @@ cp .env.example .env
 | `SHINY_URI` | フィード URI（公開後に取得） | Yes |
 | `SERVICE_DID` | カスタム DID（デフォルト: `did:web:{HOSTNAME}`） | No |
 | `FEEDGEN_SQLITE_LOCATION` | SQLite DB の保存先（デフォルト: `feed.db`。compose 実行時は両サービス共有の `db/feed.db` が自動設定される） | No |
-| `JETSTREAM_ENDPOINT` | Jetstream の WebSocket URL（デフォルト: `wss://jetstream2.us-east.bsky.network/subscribe`） | No |
+| `JETSTREAM_ENDPOINT` | Jetstream の WebSocket URL（デフォルト: `wss://jetstream.us-east.bsky.network/subscribe`。切り替え先は `jetstream.us-west.bsky.network`） | No |
 | `FEEDGEN_POST_RETENTION_DAYS` | 投稿の保持日数（デフォルト: `30`、`0` で無期限） | No |
 | `EXCLUDED_DID` | 除外する DID（セミコロン区切り） | No |
 | `PRIORITY_DID` | 優先する DID（セミコロン区切り） | No |
 | `IGNORE_ARCHIVED_POSTS` | Twitter/X からのインポート投稿を除外 | No |
 | `IGNORE_REPLY_POSTS` | リプライ投稿を除外 | No |
+
+> **`JETSTREAM_ENDPOINT` を切り替えると、ingest は起動時にカーソルを8時間巻き戻す。**
+> 保存済みカーソルは切り替え前のホストが付けた時刻なので、そのホストが遅れていた場合、
+> 同じカーソルのまま新ホストへ繋ぐと未収集分を恒久的に読み飛ばすため。
+> 巻き戻し分は再生されるが、登録済みの投稿は重複しない。
+>
+> 8時間より前まで戻したい場合（ingest を長く止めていた場合など）は、起動前に手動で巻き戻す:
+>
+> ```bash
+> docker compose stop ingest
+> docker compose run --rm ingest python scripts/rewind_cursor.py --hours 24
+> docker compose up -d ingest
+> ```
 
 **フィード公開時（`publish_feed.py`）に必要:**
 
@@ -134,7 +147,9 @@ uv run python publish_feed.py
 ```
 ├── .github/workflows/   # CI・自動デプロイ（GitHub Actions）
 ├── scripts/
-│   └── build_user_dict.py  # Sudachi ユーザー辞書ビルド（pytest/Docker が自動実行）
+│   ├── build_user_dict.py  # Sudachi ユーザー辞書ビルド（pytest/Docker が自動実行）
+│   ├── check_keyword.py    # キーワード追加＋マッチ検証
+│   └── rewind_cursor.py    # Jetstream カーソルの巻き戻し（購読ホスト切り替え時）
 ├── Dockerfile           # マルチステージビルド
 ├── compose.yml          # Docker Compose 設定
 ├── pyproject.toml       # プロジェクト設定・依存関係

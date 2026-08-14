@@ -23,7 +23,7 @@ data_filter.operations_callback()
       │  5. 本文 + 画像 ALT テキストに対しキーワードマッチング
       │  6. 登録済み URI はスキップ（再接続巻き戻しの重複排除）
       ▼
-SQLite (WAL モード, peewee ORM: Post / SubscriptionState)
+SQLite (WAL モード, peewee ORM: Post / SubscriptionState / IngestMeta)
       ▲
       │  indexed_at DESC, cid DESC + カーソルページネーション
 algos/shiny_colors.handler()
@@ -35,6 +35,12 @@ Flask (app.py) ← 配信専用（import 時副作用なし）
 ```
 
 - Jetstream のカーソル（`time_us`）は約5秒ごとに `SubscriptionState`（キー: `jetstream`）へ永続化され、再接続時は5秒巻き戻して再開する（取りこぼし防止。重複は insert 時に排除）。
+- **購読接続の堅牢化**（詳細は [2026-08-14 の配信遅延レポート](reports/2026-08-14-jetstream2-配信遅延.md)）:
+  - `ws.recv(timeout=RECV_TIMEOUT_SECONDS)`（60秒）で受信の停滞を検知して繋ぎ直す。投稿ストリームは常時流れているため、無音は接続が死んだ兆候。
+  - `max_queue`（1024）と `ping_timeout`（60秒）を既定値から引き上げる。既定の `max_queue=16` は 60件/秒 のストリームでは0.3秒分しかなく、一瞬の処理遅延で受信スレッドが停止して Pong を返せなくなり、自分で keepalive タイムアウトを起こす。
+  - `StalenessMonitor` が「イベントの `time_us` と投稿の `createdAt` の差」の中央値を5分ごとに評価し、15分以上ならホストの配信遅延として WARNING を出す。ホストが遅れても `time_us` は現在時刻のまま中身だけが古くなるため、カーソルの遅れでは検知できない。
+  - 切断時のログにはカーソルの実時刻からの遅れを併記する。
+- **購読ホストを変えたら起動時にカーソルを8時間巻き戻す。** 直近の購読先は `IngestMeta`（キー: `jetstream_endpoint`）に記録し、`JETSTREAM_ENDPOINT` と食い違ったら巻き戻す。切り替え前のホストが遅れていた場合、カーソルは実時刻付近を指していても投稿は未収集で、そのまま繋ぐと恒久的に読み飛ばすため。それより前まで戻すには `scripts/rewind_cursor.py --hours N` を使う。
 - 削除イベントを受けると DB からも該当投稿を削除し同期を維持する。
 - 保持期限（`FEEDGEN_POST_RETENTION_DAYS`、デフォルト30日）を過ぎた投稿は ingest が1時間ごとに削除する。
 - フィードのカーソルは `{ミリ秒タイムスタンプ}::{cid}` 形式。末尾に達すると `eof` を返す。不正なカーソルは 400 を返す。
@@ -46,10 +52,10 @@ Flask (app.py) ← 配信専用（import 時副作用なし）
 | ファイル | 役割 | 備考 |
 |---|---|---|
 | `server/app.py` | Flask アプリ・XRPC エンドポイント | 配信専用。import 時副作用なし |
-| `server/ingest.py` | Jetstream 購読・再接続・カーソル管理・保持期限削除 | 独立プロセス。切断時は5秒後に再接続 |
+| `server/ingest.py` | Jetstream 購読・再接続・カーソル管理・配信遅延監視・保持期限削除 | 独立プロセス。切断時は5秒後に再接続 |
 | `server/data_filter.py` | 投稿フィルタリング・DB 書き込み | 本文と画像 ALT の両方を判定。URI 重複は排除 |
 | `server/matcher.py` | キーワードマッチングエンジン | 起動時に keyword.toml を読み正規表現をコンパイル |
-| `server/database.py` | peewee モデル（Post, SubscriptionState） | import 時にテーブル作成 |
+| `server/database.py` | peewee モデル（Post, SubscriptionState, IngestMeta） | import 時にテーブル作成 |
 | `server/config.py` | 環境変数の読み込み・検証 | HOSTNAME / SHINY_URI 未設定なら起動時に例外 |
 | `server/algos/shiny_colors.py` | フィードアルゴリズム（時系列 + カーソル） | |
 | `server/auth.py` | JWT 検証（未使用の参考実装） | フィードがユーザー非依存のため |
