@@ -28,8 +28,11 @@ if SHINY_URI is None:
 
 FEEDGEN_SQLITE_LOCATION = os.environ.get('FEEDGEN_SQLITE_LOCATION', 'feed.db')
 
+# v2 ホスト。v1 ワイヤ（/subscribe）も提供する。
+# レガシーの jetstream1/2.us-east は凍結済みで、2026-08-14 に jetstream2.us-east が
+# 約5時間遅れで配信する障害を起こしたため既定値から外した。
 JETSTREAM_ENDPOINT = os.environ.get(
-    'JETSTREAM_ENDPOINT', 'wss://jetstream2.us-east.bsky.network/subscribe'
+    'JETSTREAM_ENDPOINT', 'wss://jetstream.us-east.bsky.network/subscribe'
 )
 
 def _parse_retention_days(value: str) -> int:

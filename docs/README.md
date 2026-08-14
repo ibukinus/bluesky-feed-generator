@@ -17,6 +17,8 @@
 - [2026-07-03 プロジェクト全体分析](reports/2026-07-03-project-analysis.md)
 - [2026-07-03 追加課題調査](reports/2026-07-03-additional-issues.md)
 - [2026-07-03 刷新方針の検討](reports/2026-07-03-renewal-assessment.md)
+- [2026-08-14 Jetstream v2 互換性調査](reports/2026-08-14-jetstream-v2-互換性調査.md)
+- [2026-08-14 jetstream2.us-east の配信遅延によるフィード遅延](reports/2026-08-14-jetstream2-配信遅延.md)
 
 ## ADR 一覧
 
