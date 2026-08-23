@@ -50,7 +50,7 @@ cp .env.example .env
 | `SHINY_URI` | フィード URI（公開後に取得） | Yes |
 | `SERVICE_DID` | カスタム DID（デフォルト: `did:web:{HOSTNAME}`） | No |
 | `FEEDGEN_SQLITE_LOCATION` | SQLite DB の保存先（デフォルト: `feed.db`。compose 実行時は両サービス共有の `db/feed.db` が自動設定される） | No |
-| `JETSTREAM_ENDPOINT` | Jetstream の WebSocket URL（デフォルト: `wss://jetstream.us-east.bsky.network/subscribe`。切り替え先は `jetstream.us-west.bsky.network`） | No |
+| `JETSTREAM_ENDPOINT` | Jetstream の WebSocket URL（デフォルト: `wss://jetstream.us-west.bsky.network/subscribe`。切り替え先は `jetstream1.us-west.bsky.network`） | No |
 | `FEEDGEN_POST_RETENTION_DAYS` | 投稿の保持日数（デフォルト: `30`、`0` で無期限） | No |
 | `EXCLUDED_DID` | 除外する DID（セミコロン区切り） | No |
 | `PRIORITY_DID` | 優先する DID（セミコロン区切り） | No |
