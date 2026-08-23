@@ -1,4 +1,5 @@
 import datetime
+import json
 import time
 from unittest.mock import patch
 
@@ -14,16 +15,21 @@ from server.data_filter import operations_callback
 from server.ingest import (
     ENDPOINT_CHANGE_REWIND_US,
     ENDPOINT_META_KEY,
+    FAILOVER_AFTER_FAILURES,
+    PRIMARY_META_KEY,
     RECONNECT_REWIND_US,
     SERVICE_NAME,
     STALENESS_MIN_SAMPLES,
+    EndpointRotator,
     StalenessMonitor,
     _apply_endpoint_change,
+    _failover,
     build_url,
     cleanup_old_posts,
     cursor_for_endpoint,
     cursor_lag_seconds,
     event_staleness_seconds,
+    initial_endpoint,
     ops_from_event,
     run,
     should_reset_cursor,
@@ -129,14 +135,22 @@ class TestOpsFromEvent:
 
 
 class TestBuildUrl:
+    ENDPOINT = 'wss://jetstream.example/subscribe'
+
     def test_without_cursor(self):
-        url = build_url(None)
+        url = build_url(self.ENDPOINT, None)
+        assert url.startswith(f'{self.ENDPOINT}?')
         assert 'wantedCollections=app.bsky.feed.post' in url
         assert 'cursor' not in url
 
     def test_with_cursor_rewinds(self):
-        url = build_url(10_000_000 + RECONNECT_REWIND_US)
+        url = build_url(self.ENDPOINT, 10_000_000 + RECONNECT_REWIND_US)
         assert 'cursor=10000000' in url
+
+    def test_uses_given_endpoint(self):
+        # フェイルオーバー後は切り替え先の URL を組む
+        url = build_url('wss://other.example/subscribe', None)
+        assert url.startswith('wss://other.example/subscribe?')
 
 
 class TestShouldResetCursor:
@@ -216,29 +230,37 @@ class TestEventStalenessSeconds:
 
 
 class TestStalenessMonitor:
+    ENDPOINT = 'wss://jetstream.example/subscribe'
+
     def _feed(self, monitor, hours_behind, count=STALENESS_MIN_SAMPLES):
+        """サンプルを流し込み、フェイルオーバーすべきと判定されたかを返す"""
         now = datetime.datetime.now(datetime.UTC)
         created = (now - datetime.timedelta(hours=hours_behind)).isoformat()
+        should_failover = False
         for _ in range(count):
-            monitor.add(make_event_at(created, int(now.timestamp() * 1_000_000)))
+            if monitor.add(make_event_at(created, int(now.timestamp() * 1_000_000))):
+                should_failover = True
+        return should_failover
 
     @patch('server.ingest.STALENESS_CHECK_INTERVAL_SECONDS', 0)
     @patch('server.ingest.logger')
     def test_warns_when_host_is_behind(self, mock_logger):
-        self._feed(StalenessMonitor(), hours_behind=5)
+        self._feed(StalenessMonitor(self.ENDPOINT), hours_behind=5)
         assert mock_logger.warning.called
         assert '5.0 時間' in mock_logger.warning.call_args[0][0]
+        # 遅れているホスト名がログから分かること
+        assert self.ENDPOINT in mock_logger.warning.call_args[0][0]
 
     @patch('server.ingest.STALENESS_CHECK_INTERVAL_SECONDS', 0)
     @patch('server.ingest.logger')
     def test_healthy_host_is_silent(self, mock_logger):
-        self._feed(StalenessMonitor(), hours_behind=0)
+        self._feed(StalenessMonitor(self.ENDPOINT), hours_behind=0)
         assert not mock_logger.warning.called
 
     @patch('server.ingest.STALENESS_CHECK_INTERVAL_SECONDS', 0)
     @patch('server.ingest.logger')
     def test_recovery_logged_once(self, mock_logger):
-        monitor = StalenessMonitor()
+        monitor = StalenessMonitor(self.ENDPOINT)
         self._feed(monitor, hours_behind=5)
         self._feed(monitor, hours_behind=0)
         self._feed(monitor, hours_behind=0)
@@ -248,15 +270,37 @@ class TestStalenessMonitor:
     @patch('server.ingest.STALENESS_CHECK_INTERVAL_SECONDS', 0)
     @patch('server.ingest.logger')
     def test_too_few_samples_does_not_report(self, mock_logger):
-        self._feed(StalenessMonitor(), hours_behind=5, count=STALENESS_MIN_SAMPLES - 1)
+        self._feed(
+            StalenessMonitor(self.ENDPOINT),
+            hours_behind=5,
+            count=STALENESS_MIN_SAMPLES - 1,
+        )
         assert not mock_logger.warning.called
 
     @patch('server.ingest.STALENESS_CHECK_INTERVAL_SECONDS', 0)
     @patch('server.ingest.logger')
     def test_interval_not_elapsed_does_not_report(self, mock_logger):
         with patch('server.ingest.STALENESS_CHECK_INTERVAL_SECONDS', 3600):
-            self._feed(StalenessMonitor(), hours_behind=5)
+            self._feed(StalenessMonitor(self.ENDPOINT), hours_behind=5)
         assert not mock_logger.warning.called
+
+    @patch('server.ingest.STALENESS_CHECK_INTERVAL_SECONDS', 0)
+    @patch('server.ingest.logger')
+    def test_severe_delay_requests_failover(self, _mock_logger):
+        # 1時間の遅れは STALENESS_FAILOVER_SECONDS（30分）を超える
+        assert self._feed(StalenessMonitor(self.ENDPOINT), hours_behind=1)
+
+    @patch('server.ingest.STALENESS_CHECK_INTERVAL_SECONDS', 0)
+    @patch('server.ingest.logger')
+    def test_mild_delay_warns_without_failover(self, mock_logger):
+        # 20分の遅れは警告のみ。一時的な遅れでホストを切り替えない
+        assert not self._feed(StalenessMonitor(self.ENDPOINT), hours_behind=20 / 60)
+        assert mock_logger.warning.called
+
+    @patch('server.ingest.STALENESS_CHECK_INTERVAL_SECONDS', 0)
+    @patch('server.ingest.logger')
+    def test_healthy_host_does_not_request_failover(self, _mock_logger):
+        assert not self._feed(StalenessMonitor(self.ENDPOINT), hours_behind=0)
 
 
 class TestCursorLagSeconds:
@@ -304,30 +348,141 @@ class TestApplyEndpointChange:
         SubscriptionState.delete().execute()
         IngestMeta.delete().execute()
 
-    @patch('server.ingest.config')
-    def test_rewinds_and_records_endpoint(self, mock_config):
-        mock_config.JETSTREAM_ENDPOINT = 'wss://new.example/subscribe'
+    def test_rewinds_and_records_endpoint(self):
         now_us = int(time.time() * 1_000_000)
         SubscriptionState.create(service=SERVICE_NAME, cursor=now_us)
 
-        rewound = _apply_endpoint_change(now_us)
+        rewound = _apply_endpoint_change(now_us, 'wss://new.example/subscribe')
 
         assert rewound == pytest.approx(now_us - ENDPOINT_CHANGE_REWIND_US, abs=5_000_000)
         # 巻き戻したカーソルは永続化される（起動直後に落ちても失われない）
         assert SubscriptionState.get(SubscriptionState.service == SERVICE_NAME).cursor == rewound
         assert IngestMeta.get(IngestMeta.key == ENDPOINT_META_KEY).value == 'wss://new.example/subscribe'
 
-    @patch('server.ingest.config')
-    def test_unchanged_endpoint_is_noop(self, mock_config):
-        mock_config.JETSTREAM_ENDPOINT = 'wss://same.example/subscribe'
+    def test_unchanged_endpoint_is_noop(self):
         now_us = int(time.time() * 1_000_000)
         SubscriptionState.create(service=SERVICE_NAME, cursor=now_us)
 
-        first = _apply_endpoint_change(now_us)
-        second = _apply_endpoint_change(first)
+        first = _apply_endpoint_change(now_us, 'wss://same.example/subscribe')
+        second = _apply_endpoint_change(first, 'wss://same.example/subscribe')
 
         assert second == first
         assert SubscriptionState.get(SubscriptionState.service == SERVICE_NAME).cursor == first
+
+
+class TestEndpointRotator:
+    ENDPOINTS = [
+        'wss://first.example/subscribe',
+        'wss://second.example/subscribe',
+        'wss://third.example/subscribe',
+    ]
+
+    def test_starts_at_first_candidate(self):
+        assert EndpointRotator(self.ENDPOINTS).current == self.ENDPOINTS[0]
+
+    def test_advances_in_order(self):
+        rotator = EndpointRotator(self.ENDPOINTS)
+        assert rotator.advance() == self.ENDPOINTS[1]
+        assert rotator.advance() == self.ENDPOINTS[2]
+
+    def test_wraps_around(self):
+        """全ホストが落ちていても再接続を続けられるよう打ち止めにしない"""
+        rotator = EndpointRotator(self.ENDPOINTS)
+        for _ in range(len(self.ENDPOINTS)):
+            rotator.advance()
+        assert rotator.current == self.ENDPOINTS[0]
+
+    def test_single_endpoint_has_no_alternatives(self):
+        rotator = EndpointRotator([self.ENDPOINTS[0]])
+        assert not rotator.has_alternatives
+        assert rotator.advance() == self.ENDPOINTS[0]
+
+    def test_multiple_endpoints_have_alternatives(self):
+        assert EndpointRotator(self.ENDPOINTS).has_alternatives
+
+    def test_empty_endpoints_rejected(self):
+        with pytest.raises(ValueError):
+            EndpointRotator([])
+
+    def test_starts_at_given_endpoint(self):
+        rotator = EndpointRotator(self.ENDPOINTS, start_at=self.ENDPOINTS[1])
+        assert rotator.current == self.ENDPOINTS[1]
+        assert rotator.advance() == self.ENDPOINTS[2]
+
+    def test_unknown_start_falls_back_to_first(self):
+        # 候補から外された購読先が記録されていても止まらない
+        rotator = EndpointRotator(self.ENDPOINTS, start_at='wss://gone.example/subscribe')
+        assert rotator.current == self.ENDPOINTS[0]
+
+
+class TestInitialEndpoint:
+    ENDPOINTS = ['wss://first.example/subscribe', 'wss://second.example/subscribe']
+
+    def test_resumes_automatic_failover_target(self):
+        """自動で移った先は再起動後も引き継ぐ（毎回8時間巻き戻さないため）"""
+        assert initial_endpoint(
+            self.ENDPOINTS, self.ENDPOINTS[1], self.ENDPOINTS[0], self.ENDPOINTS[0]
+        ) == self.ENDPOINTS[1]
+
+    def test_manual_primary_change_wins(self):
+        """第一候補を変えたら人の意図を優先して先頭から始める"""
+        assert initial_endpoint(
+            self.ENDPOINTS, self.ENDPOINTS[1], 'wss://old-primary.example/subscribe',
+            self.ENDPOINTS[0],
+        ) == self.ENDPOINTS[0]
+
+    def test_no_record_starts_at_first(self):
+        assert initial_endpoint(self.ENDPOINTS, None, None, self.ENDPOINTS[0]) == self.ENDPOINTS[0]
+
+    def test_saved_endpoint_no_longer_a_candidate(self):
+        assert initial_endpoint(
+            self.ENDPOINTS, 'wss://gone.example/subscribe', self.ENDPOINTS[0], self.ENDPOINTS[0]
+        ) == self.ENDPOINTS[0]
+
+
+class TestFailover:
+    ENDPOINTS = ['wss://first.example/subscribe', 'wss://second.example/subscribe']
+
+    def setup_method(self):
+        db.create_tables([SubscriptionState, IngestMeta], safe=True)
+        SubscriptionState.delete().execute()
+        IngestMeta.delete().execute()
+
+    @patch('server.ingest.logger')
+    def test_switch_rewinds_cursor(self, _mock_logger):
+        """前のホストが遅れていた可能性があるため、理由によらず巻き戻す"""
+        rotator = EndpointRotator(self.ENDPOINTS)
+        now_us = int(time.time() * 1_000_000)
+        SubscriptionState.create(service=SERVICE_NAME, cursor=now_us)
+
+        cursor = _failover(rotator, now_us, '3回連続で購読に失敗したため')
+
+        assert cursor == pytest.approx(now_us - ENDPOINT_CHANGE_REWIND_US, abs=5_000_000)
+        assert rotator.current == self.ENDPOINTS[1]
+        assert SubscriptionState.get(SubscriptionState.service == SERVICE_NAME).cursor == cursor
+        assert IngestMeta.get(IngestMeta.key == ENDPOINT_META_KEY).value == self.ENDPOINTS[1]
+
+    @patch('server.ingest.logger')
+    def test_old_cursor_not_advanced(self, _mock_logger):
+        """長く繋がらなかった後の切り替えでカーソルを前進させない"""
+        rotator = EndpointRotator(self.ENDPOINTS)
+        stale_us = int(time.time() * 1_000_000) - 55 * 3600 * 1_000_000
+        SubscriptionState.create(service=SERVICE_NAME, cursor=stale_us)
+
+        assert _failover(rotator, stale_us, '3回連続で購読に失敗したため') == stale_us
+
+    @patch('server.ingest.logger')
+    def test_single_endpoint_does_not_switch(self, mock_logger):
+        rotator = EndpointRotator([self.ENDPOINTS[0]])
+        now_us = int(time.time() * 1_000_000)
+
+        cursor = _failover(rotator, now_us, '3回連続で購読に失敗したため')
+
+        assert cursor == now_us
+        assert rotator.current == self.ENDPOINTS[0]
+        assert not mock_logger.warning.called
+        # 切り替えていないので記録も残らない
+        assert IngestMeta.get_or_none(IngestMeta.key == ENDPOINT_META_KEY) is None
 
 
 class TestRunReconnectsOnSilence:
@@ -351,6 +506,220 @@ class TestRunReconnectsOnSilence:
         with pytest.raises(SystemExit):
             run()
         assert mock_connect.call_count == 2
+
+
+@patch('server.ingest.RECONNECT_DELAY_SECONDS', 0)
+class TestRunFailover:
+    """繋がらない・黙り込むホストから自動で別ホストへ移る"""
+
+    ENDPOINTS = ['wss://first.example/subscribe', 'wss://second.example/subscribe']
+
+    class _SilentConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            return False
+
+        def recv(self, timeout=None):
+            raise TimeoutError
+
+    class _OneEventConnection:
+        """イベントを1件返してから黙り込む"""
+
+        def __init__(self):
+            self._sent = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            return False
+
+        def recv(self, timeout=None):
+            if self._sent:
+                raise TimeoutError
+            self._sent = True
+            # フィード対象外のテキストにして DB への書き込みを避ける
+            return json.dumps(make_create_event(text='今日はいい天気'))
+
+    def setup_method(self):
+        db.create_tables([SubscriptionState, IngestMeta], safe=True)
+        SubscriptionState.delete().execute()
+        IngestMeta.delete().execute()
+
+    def _endpoints_used(self, mock_connect):
+        return [call.args[0].split('?')[0] for call in mock_connect.call_args_list]
+
+    def _configure(self, mock_config, endpoints):
+        mock_config.JETSTREAM_ENDPOINTS = endpoints
+        mock_config.JETSTREAM_ENDPOINT = endpoints[0]
+        # イベント受信で走る cleanup_old_posts が MagicMock を掴まないよう実値を入れる
+        mock_config.POST_RETENTION_DAYS = 0
+
+    @patch('server.ingest.config')
+    @patch('server.ingest._load_cursor', return_value=None)
+    @patch('server.ingest.connect')
+    def test_switches_after_consecutive_failures(self, mock_connect, _cursor, mock_config):
+        self._configure(mock_config, self.ENDPOINTS)
+        failure = OSError('接続できません')
+        # 閾値ちょうどで失敗させ、次の接続先を確かめてから抜ける
+        mock_connect.side_effect = [failure] * FAILOVER_AFTER_FAILURES + [SystemExit]
+
+        with pytest.raises(SystemExit):
+            run()
+
+        used = self._endpoints_used(mock_connect)
+        assert used[:FAILOVER_AFTER_FAILURES] == [self.ENDPOINTS[0]] * FAILOVER_AFTER_FAILURES
+        assert used[FAILOVER_AFTER_FAILURES] == self.ENDPOINTS[1]
+
+    @patch('server.ingest.config')
+    @patch('server.ingest._load_cursor', return_value=None)
+    @patch('server.ingest.connect')
+    def test_switches_after_consecutive_silence(self, mock_connect, _cursor, mock_config):
+        """ハンドシェイクは通るのにイベントを流さないホストからも移る"""
+        self._configure(mock_config, self.ENDPOINTS)
+        mock_connect.side_effect = (
+            [self._SilentConnection() for _ in range(FAILOVER_AFTER_FAILURES)] + [SystemExit]
+        )
+
+        with pytest.raises(SystemExit):
+            run()
+
+        assert self._endpoints_used(mock_connect)[FAILOVER_AFTER_FAILURES] == self.ENDPOINTS[1]
+
+    @patch('server.ingest.config')
+    @patch('server.ingest._load_cursor', return_value=None)
+    @patch('server.ingest.connect')
+    def test_received_event_resets_failures(self, mock_connect, _cursor, mock_config):
+        """一度でもイベントが届いたら数え直す（散発的な切断で切り替えない）"""
+        self._configure(mock_config, self.ENDPOINTS)
+        failure = OSError('接続できません')
+        mock_connect.side_effect = [
+            failure,                     # 1回目
+            failure,                     # 2回目
+            self._OneEventConnection(),  # イベントが届いて数え直し（その後の無音で1回目）
+            failure,                     # 2回目
+            SystemExit,
+        ]
+
+        with pytest.raises(SystemExit):
+            run()
+
+        # 数え直しが無ければ4回目で閾値に達して切り替わっていた
+        assert self._endpoints_used(mock_connect) == [self.ENDPOINTS[0]] * 5
+
+    class _StaleConnection:
+        """大きく遅れたイベントを流し続ける（判定に要る件数を返してから抜ける）"""
+
+        def __init__(self, count):
+            self._remaining = count
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            return False
+
+        def recv(self, timeout=None):
+            if self._remaining <= 0:
+                raise SystemExit
+            self._remaining -= 1
+            now = datetime.datetime.now(datetime.UTC)
+            created = (now - datetime.timedelta(hours=5)).isoformat()
+            event = make_event_at(created, int(now.timestamp() * 1_000_000))
+            event['commit']['record']['text'] = '今日はいい天気'
+            return json.dumps(event)
+
+    @patch('server.ingest.STALENESS_CHECK_INTERVAL_SECONDS', 0)
+    @patch('server.ingest.config')
+    @patch('server.ingest._load_cursor', return_value=None)
+    @patch('server.ingest.connect')
+    def test_staleness_switches_endpoint(self, mock_connect, _cursor, mock_config):
+        self._configure(mock_config, self.ENDPOINTS)
+        mock_connect.side_effect = [
+            self._StaleConnection(STALENESS_MIN_SAMPLES), SystemExit,
+        ]
+
+        with pytest.raises(SystemExit):
+            run()
+
+        assert self._endpoints_used(mock_connect) == [self.ENDPOINTS[0], self.ENDPOINTS[1]]
+
+    @patch('server.ingest.STALENESS_CHECK_INTERVAL_SECONDS', 0)
+    @patch('server.ingest.config')
+    @patch('server.ingest._load_cursor', return_value=None)
+    @patch('server.ingest.connect')
+    def test_staleness_without_alternatives_stays_connected(
+        self, mock_connect, _cursor, mock_config
+    ):
+        """切り替え先が無ければ、遅れていても繋ぎ直さない（無駄な再接続を避ける）"""
+        self._configure(mock_config, [self.ENDPOINTS[0]])
+        # 判定に要る件数の倍を流しても、接続は張り替えられない
+        mock_connect.side_effect = [self._StaleConnection(STALENESS_MIN_SAMPLES * 2)]
+
+        with pytest.raises(SystemExit):
+            run()
+
+        assert mock_connect.call_count == 1
+
+    @patch('server.ingest.config')
+    @patch('server.ingest._load_cursor', return_value=None)
+    @patch('server.ingest.connect')
+    def test_records_primary_on_start(self, mock_connect, _cursor, mock_config):
+        """次回起動時に手動変更と自動切り替えを見分けられるよう第一候補を残す"""
+        self._configure(mock_config, self.ENDPOINTS)
+        mock_connect.side_effect = [SystemExit]
+
+        with pytest.raises(SystemExit):
+            run()
+
+        assert IngestMeta.get(IngestMeta.key == PRIMARY_META_KEY).value == self.ENDPOINTS[0]
+
+    @patch('server.ingest.config')
+    @patch('server.ingest._load_cursor', return_value=None)
+    @patch('server.ingest.connect')
+    def test_resumes_from_failover_target(self, mock_connect, _cursor, mock_config):
+        """前回自動で移った先から始める（落ちたホストへ繋ぎ直さない）"""
+        self._configure(mock_config, self.ENDPOINTS)
+        IngestMeta.replace(key=ENDPOINT_META_KEY, value=self.ENDPOINTS[1]).execute()
+        IngestMeta.replace(key=PRIMARY_META_KEY, value=self.ENDPOINTS[0]).execute()
+        mock_connect.side_effect = [SystemExit]
+
+        with pytest.raises(SystemExit):
+            run()
+
+        assert self._endpoints_used(mock_connect) == [self.ENDPOINTS[1]]
+
+    @patch('server.ingest.config')
+    @patch('server.ingest._load_cursor', return_value=None)
+    @patch('server.ingest.connect')
+    def test_interrupted_start_still_honours_primary(self, mock_connect, _cursor, mock_config):
+        """起動途中で落ちて記録が片方だけ残っても、設定した第一候補を無視しない"""
+        self._configure(mock_config, self.ENDPOINTS)
+        # 購読先だけ新しい第一候補に更新され、第一候補の記録が古いまま残った状態
+        IngestMeta.replace(key=ENDPOINT_META_KEY, value=self.ENDPOINTS[0]).execute()
+        IngestMeta.replace(key=PRIMARY_META_KEY, value='wss://old-primary.example/subscribe').execute()
+        mock_connect.side_effect = [SystemExit]
+
+        with pytest.raises(SystemExit):
+            run()
+
+        assert self._endpoints_used(mock_connect) == [self.ENDPOINTS[0]]
+
+    @patch('server.ingest.config')
+    @patch('server.ingest._load_cursor', return_value=None)
+    @patch('server.ingest.connect')
+    def test_single_endpoint_keeps_retrying(self, mock_connect, _cursor, mock_config):
+        """候補が1つしかない設定では切り替えず再接続を続ける"""
+        self._configure(mock_config, [self.ENDPOINTS[0]])
+        failure = OSError('接続できません')
+        mock_connect.side_effect = [failure] * (FAILOVER_AFTER_FAILURES + 1) + [SystemExit]
+
+        with pytest.raises(SystemExit):
+            run()
+
+        assert set(self._endpoints_used(mock_connect)) == {self.ENDPOINTS[0]}
 
 
 class TestEventToDatabase:

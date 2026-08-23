@@ -28,12 +28,39 @@ if SHINY_URI is None:
 
 FEEDGEN_SQLITE_LOCATION = os.environ.get('FEEDGEN_SQLITE_LOCATION', 'feed.db')
 
-# v2 ホスト。v1 ワイヤ（/subscribe）も提供する。
+# 購読先の第一候補。v2 ホストは v1 ワイヤ（/subscribe）も提供する。
 # jetstream.us-east は 2026-08-20 にバックエンド全滅（503）で停止したため既定値から外した
 # （docs/reports/2026-08-23-jetstream-us-east停止.md）。レガシーの jetstream1/2.us-east も
 # 凍結済みで、2026-08-14 に jetstream2.us-east が約5時間遅れで配信する障害を起こしている。
 JETSTREAM_ENDPOINT = os.environ.get(
     'JETSTREAM_ENDPOINT', 'wss://jetstream.us-west.bsky.network/subscribe'
+)
+
+# 第一候補が繋がらない・遅れているときに順に試すホスト（セミコロン区切り）。
+# 空文字を設定すると自動フェイルオーバーを無効にできる。
+_DEFAULT_FALLBACK_ENDPOINTS = ';'.join([
+    'wss://jetstream.us-east.bsky.network/subscribe',
+    'wss://jetstream1.us-west.bsky.network/subscribe',
+    'wss://jetstream1.us-east.bsky.network/subscribe',
+])
+JETSTREAM_FALLBACK_ENDPOINTS = os.environ.get(
+    'JETSTREAM_FALLBACK_ENDPOINTS', _DEFAULT_FALLBACK_ENDPOINTS
+)
+
+
+def _build_endpoint_candidates(primary: str, fallbacks: str) -> list[str]:
+    """第一候補とフォールバックを繋いだ購読先リストを返す（重複は除く）。"""
+    candidates = [primary]
+    for endpoint in fallbacks.split(';'):
+        endpoint = endpoint.strip()
+        if endpoint and endpoint not in candidates:
+            candidates.append(endpoint)
+    return candidates
+
+
+# ingest が順に試す購読先。先頭が第一候補。
+JETSTREAM_ENDPOINTS = _build_endpoint_candidates(
+    JETSTREAM_ENDPOINT, JETSTREAM_FALLBACK_ENDPOINTS
 )
 
 def _parse_retention_days(value: str) -> int:
