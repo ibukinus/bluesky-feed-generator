@@ -51,20 +51,32 @@ STALENESS_WARN_SECONDS = 900
 STALENESS_SAMPLE_SIZE = 500
 STALENESS_MIN_SAMPLES = 30
 
+# 自動フェイルオーバー。ホスト単位の障害から自力で復帰するための仕組み。
+# 2026-08-20 の jetstream.us-east 停止では、5秒間隔の再接続を 55 時間続けても
+# 復帰できなかった（docs/reports/2026-08-23-jetstream-us-east停止.md）。
+# 連続でこの回数だけ接続に失敗したら次の候補ホストへ移る（5秒間隔なので約15秒）。
+FAILOVER_AFTER_FAILURES = 3
+# 配信遅延がこの秒数を超えたら次の候補ホストへ移る。警告だけ出す
+# STALENESS_WARN_SECONDS より高くし、一時的な遅れで切り替えないようにする。
+STALENESS_FAILOVER_SECONDS = 1800
+
 # 購読ホストが前回起動時から変わっていたら、この時間だけカーソルを巻き戻す。
 # 保存済みカーソルは前のホストが付けた time_us なので、そのホストが遅れていた
 # 場合はカーソルが実時刻付近を指していても投稿は未収集で、巻き戻さないと
 # 恒久的に読み飛ばす。再生分の重複は insert 時に排除される。
 # これより長く戻す必要があるときは scripts/rewind_cursor.py を使う。
 ENDPOINT_META_KEY = 'jetstream_endpoint'
+# 直近の起動時の第一候補（JETSTREAM_ENDPOINT）。自動フェイルオーバーで移った先と、
+# 人が設定を変えた結果とを区別するために記録する。
+PRIMARY_META_KEY = 'jetstream_primary'
 ENDPOINT_CHANGE_REWIND_US = 8 * 3600 * 1_000_000
 
 
-def build_url(cursor: Optional[int]) -> str:
+def build_url(endpoint: str, cursor: Optional[int]) -> str:
     params = {'wantedCollections': models.ids.AppBskyFeedPost}
     if cursor:
         params['cursor'] = str(max(cursor - RECONNECT_REWIND_US, 0))
-    return f'{config.JETSTREAM_ENDPOINT}?{urllib.parse.urlencode(params)}'
+    return f'{endpoint}?{urllib.parse.urlencode(params)}'
 
 
 def ops_from_event(event: dict) -> Optional[defaultdict]:
@@ -127,19 +139,50 @@ def event_staleness_seconds(event: dict) -> Optional[float]:
     return time_us / 1_000_000 - created.timestamp()
 
 
+class EndpointRotator:
+    """候補ホストを順に切り替える。
+
+    末尾まで使い切ったら先頭へ戻る。全ホストが同時に落ちている場合でも
+    再接続を続けられるようにするため、打ち止めにはしない。
+    """
+
+    def __init__(self, endpoints: list[str], start_at: Optional[str] = None) -> None:
+        if not endpoints:
+            raise ValueError('購読先（JETSTREAM_ENDPOINT）が1つも設定されていません。')
+        self._endpoints = list(endpoints)
+        self._index = self._endpoints.index(start_at) if start_at in self._endpoints else 0
+
+    @property
+    def current(self) -> str:
+        return self._endpoints[self._index]
+
+    @property
+    def has_alternatives(self) -> bool:
+        return len(self._endpoints) > 1
+
+    def advance(self) -> str:
+        """次の候補へ移り、その購読先を返す。"""
+        self._index = (self._index + 1) % len(self._endpoints)
+        return self.current
+
+
 class StalenessMonitor:
     """Jetstream ホストの配信遅延を定期的に判定してログに出す。
 
     createdAt はクライアントの自己申告値で個々にはあてにならないため、
     一定件数の中央値で判定する。
+
+    サンプルはホストごとの状態なので、購読先を切り替えたら作り直す。
     """
 
-    def __init__(self) -> None:
+    def __init__(self, endpoint: str) -> None:
+        self._endpoint = endpoint
         self._samples: list[float] = []
         self._last_check = time.monotonic()
         self._warned = False
 
-    def add(self, event: dict) -> None:
+    def add(self, event: dict) -> bool:
+        """サンプルを1件加える。切り替えるべきほど遅れていれば True を返す。"""
         value = event_staleness_seconds(event)
         if value is not None:
             self._samples.append(value)
@@ -147,12 +190,13 @@ class StalenessMonitor:
                 del self._samples[:-STALENESS_SAMPLE_SIZE]
 
         if time.monotonic() - self._last_check >= STALENESS_CHECK_INTERVAL_SECONDS:
-            self._report()
+            return self._report()
+        return False
 
-    def _report(self) -> None:
+    def _report(self) -> bool:
         self._last_check = time.monotonic()
         if len(self._samples) < STALENESS_MIN_SAMPLES:
-            return
+            return False
 
         median = statistics.median(self._samples)
         self._samples.clear()
@@ -160,14 +204,16 @@ class StalenessMonitor:
         if median >= STALENESS_WARN_SECONDS:
             logger.warning(
                 f'Jetstream の配信が約 {median / 3600:.1f} 時間遅れています'
-                f'（{config.JETSTREAM_ENDPOINT}）。'
+                f'（{self._endpoint}）。'
                 'カーソルが追随していても収集内容は古いままです。'
-                '別のホストへの切り替えを検討してください。'
             )
             self._warned = True
-        elif self._warned:
+            return median >= STALENESS_FAILOVER_SECONDS
+
+        if self._warned:
             logger.info(f'Jetstream の配信遅延が解消しました（中央値 {median:.0f}秒）。')
             self._warned = False
+        return False
 
 
 def cleanup_old_posts() -> int:
@@ -222,6 +268,35 @@ def _save_endpoint(endpoint: str) -> None:
     IngestMeta.replace(key=ENDPOINT_META_KEY, value=endpoint).execute()
 
 
+def _load_primary() -> Optional[str]:
+    meta = IngestMeta.get_or_none(IngestMeta.key == PRIMARY_META_KEY)
+    return meta.value if meta else None
+
+
+def _save_primary(primary: str) -> None:
+    IngestMeta.replace(key=PRIMARY_META_KEY, value=primary).execute()
+
+
+def initial_endpoint(
+    endpoints: list[str],
+    saved_endpoint: Optional[str],
+    saved_primary: Optional[str],
+    primary: str,
+) -> str:
+    """起動時に最初に試す購読先を返す。
+
+    自動フェイルオーバーで移った先は再起動後も引き継ぐ。第一候補へ戻すと、落ちた
+    ままのホストへ毎回繋ぎに行き、切り替えのたびにカーソルを8時間巻き戻して再生し直す
+    ことになるため。
+
+    ただし第一候補（JETSTREAM_ENDPOINT）が前回と変わっていれば人が設定を変えた
+    ということなので、記録を無視して第一候補から始める。
+    """
+    if saved_primary == primary and saved_endpoint in endpoints:
+        return saved_endpoint
+    return endpoints[0]
+
+
 def cursor_for_endpoint(
     cursor: Optional[int], previous_endpoint: Optional[str], endpoint: str, now_us: int
 ) -> Optional[int]:
@@ -240,9 +315,8 @@ def cursor_for_endpoint(
     return min(cursor, now_us - ENDPOINT_CHANGE_REWIND_US)
 
 
-def _apply_endpoint_change(cursor: Optional[int]) -> Optional[int]:
+def _apply_endpoint_change(cursor: Optional[int], endpoint: str) -> Optional[int]:
     """購読ホストの変更を検知し、必要ならカーソルを巻き戻して永続化する。"""
-    endpoint = config.JETSTREAM_ENDPOINT
     previous = _load_endpoint()
     if previous == endpoint:
         return cursor
@@ -263,20 +337,54 @@ def _format_time_us(time_us: int) -> str:
     return f'{datetime.utcfromtimestamp(time_us / 1_000_000):%Y-%m-%d %H:%M:%S} UTC'
 
 
+def _failover(
+    rotator: EndpointRotator, cursor: Optional[int], reason: str
+) -> Optional[int]:
+    """次の候補ホストへ切り替え、カーソルを巻き戻して返す。
+
+    候補が1つしかなければ何もしない。
+
+    切り替えの理由によらず巻き戻す。前のホストが遅れて配信していた場合、カーソルは
+    実時刻付近を指していても投稿は未収集なので、そのまま新ホストへ繋ぐと恒久的に
+    読み飛ばす。接続できずに切り替える場合も「落ちる直前まで遅れていた」可能性は
+    排除できず（遅延判定は5分間隔なので、遅れ始めてすぐ落ちれば気づけない）、
+    読み飛ばしより再生のコストを取る。長時間繋がらなかった場合は保存済みカーソルの
+    方が古いため、`cursor_for_endpoint` の min により前進はしない。
+    """
+    if not rotator.has_alternatives:
+        return cursor
+
+    previous = rotator.current
+    endpoint = rotator.advance()
+    logger.warning(f'{reason}、購読先を切り替えます: {previous} → {endpoint}')
+    return _apply_endpoint_change(cursor, endpoint)
+
+
 def run() -> None:
-    cursor = _apply_endpoint_change(_load_cursor())
+    endpoints = config.JETSTREAM_ENDPOINTS
+    primary = config.JETSTREAM_ENDPOINT
+    rotator = EndpointRotator(
+        endpoints,
+        start_at=initial_endpoint(endpoints, _load_endpoint(), _load_primary(), primary),
+    )
+    # 購読先の記録を先に更新する。逆順にすると、2つの書き込みの間で落ちたときに
+    # 「第一候補は新しいのに購読先は古い」状態が残り、次の起動で古い購読先を
+    # 自動フェイルオーバー先と誤認して、変更した第一候補を無視し続けてしまう。
+    cursor = _apply_endpoint_change(_load_cursor(), rotator.current)
+    _save_primary(primary)
     last_cleanup = 0.0
-    staleness = StalenessMonitor()
+    staleness = StalenessMonitor(rotator.current)
+    failures = 0
 
     while True:
-        url = build_url(cursor)
+        url = build_url(rotator.current, cursor)
         try:
             with connect(
                 url,
                 max_queue=RECV_QUEUE_SIZE,
                 ping_timeout=PING_TIMEOUT_SECONDS,
             ) as ws:
-                logger.info(f'Jetstream に接続しました: {config.JETSTREAM_ENDPOINT} (cursor={cursor})')
+                logger.info(f'Jetstream に接続しました: {rotator.current} (cursor={cursor})')
                 # 巻き戻し再生分の古い time_us を保存してカーソルが後退しないよう、
                 # 保存済みカーソルより先に進んだイベントのみを保存対象にする
                 last_saved_us = cursor or 0
@@ -287,7 +395,12 @@ def run() -> None:
                         logger.warning(
                             f'{RECV_TIMEOUT_SECONDS}秒間イベントが届きませんでした。再接続します。'
                         )
+                        failures += 1
                         break
+
+                    # ハンドシェイクが通っても黙り込むホストがあるため、
+                    # 接続できた時点ではなく実際にイベントが届いた時点で回復とみなす
+                    failures = 0
 
                     try:
                         event = json.loads(message)
@@ -295,7 +408,12 @@ def run() -> None:
                         logger.error(f'イベントの JSON 解析に失敗しました: {e}')
                         continue
 
-                    staleness.add(event)
+                    # 切り替え先が無い設定では、繋ぎ直しても同じホストに戻るだけで
+                    # 5分ごとに無駄な再接続を繰り返すことになるため、警告に留める
+                    if staleness.add(event) and rotator.has_alternatives:
+                        cursor = _failover(rotator, cursor, '配信が遅れているため')
+                        staleness = StalenessMonitor(rotator.current)
+                        break
 
                     ops = ops_from_event(event)
                     if ops is not None:
@@ -327,7 +445,17 @@ def run() -> None:
                 f'Jetstream 接続に失敗しました: {e}{lag_text}。'
                 f'{RECONNECT_DELAY_SECONDS}秒後に再接続します。'
             )
+
+            failures += 1
             time.sleep(RECONNECT_DELAY_SECONDS)
+
+        # 接続失敗と「繋がったが無音」の両方をまとめて数え、続くようなら別ホストへ移る
+        if failures >= FAILOVER_AFTER_FAILURES:
+            cursor = _failover(
+                rotator, cursor, f'{failures}回連続で購読に失敗したため'
+            )
+            staleness = StalenessMonitor(rotator.current)
+            failures = 0
 
 
 def _shutdown_handler(*_):

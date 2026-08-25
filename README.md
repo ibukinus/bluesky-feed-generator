@@ -50,12 +50,19 @@ cp .env.example .env
 | `SHINY_URI` | フィード URI（公開後に取得） | Yes |
 | `SERVICE_DID` | カスタム DID（デフォルト: `did:web:{HOSTNAME}`） | No |
 | `FEEDGEN_SQLITE_LOCATION` | SQLite DB の保存先（デフォルト: `feed.db`。compose 実行時は両サービス共有の `db/feed.db` が自動設定される） | No |
-| `JETSTREAM_ENDPOINT` | Jetstream の WebSocket URL（デフォルト: `wss://jetstream.us-east.bsky.network/subscribe`。切り替え先は `jetstream.us-west.bsky.network`） | No |
+| `JETSTREAM_ENDPOINT` | Jetstream の WebSocket URL。購読先の第一候補（デフォルト: `wss://jetstream.us-west.bsky.network/subscribe`） | No |
+| `JETSTREAM_FALLBACK_ENDPOINTS` | 第一候補が繋がらない・遅れているときに順に試すホスト（セミコロン区切り。デフォルト: `jetstream.us-east` → `jetstream1.us-west` → `jetstream1.us-east`）。空文字で自動フェイルオーバーを無効化 | No |
 | `FEEDGEN_POST_RETENTION_DAYS` | 投稿の保持日数（デフォルト: `30`、`0` で無期限） | No |
 | `EXCLUDED_DID` | 除外する DID（セミコロン区切り） | No |
 | `PRIORITY_DID` | 優先する DID（セミコロン区切り） | No |
 | `IGNORE_ARCHIVED_POSTS` | Twitter/X からのインポート投稿を除外 | No |
 | `IGNORE_REPLY_POSTS` | リプライ投稿を除外 | No |
+
+> **ingest は購読先が繋がらなくなると自動で次の候補へ切り替える。**
+> 接続失敗または無音（60秒イベントなし）が3回続いたら、`JETSTREAM_FALLBACK_ENDPOINTS` の
+> 順に切り替える。配信遅延が30分を超えた場合も切り替える。候補を一巡したら先頭へ戻る。
+> 切り替え時はカーソルを8時間巻き戻し、自動で移った先は再起動後も引き継ぐ。
+> 通常は手動での切り替えは不要。`JETSTREAM_ENDPOINT` を変更した場合はその設定が優先される。
 
 > **`JETSTREAM_ENDPOINT` を切り替えると、ingest は起動時にカーソルを8時間巻き戻す。**
 > 保存済みカーソルは切り替え前のホストが付けた時刻なので、そのホストが遅れていた場合、

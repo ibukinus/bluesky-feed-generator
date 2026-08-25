@@ -9,7 +9,7 @@ Bluesky の Jetstream から「アイドルマスター シャイニーカラー
 収集（ingest）と配信（app）は独立したプロセスで、SQLite（WAL モード）を介して連携する。
 
 ```
-Bluesky Jetstream (JETSTREAM_ENDPOINT)
+Bluesky Jetstream (JETSTREAM_ENDPOINT / JETSTREAM_FALLBACK_ENDPOINTS)
       │  (WebSocket 購読: wantedCollections=app.bsky.feed.post, JSON)
       ▼
 server/ingest.py  ← 独立プロセス（python -m server.ingest / compose の ingest サービス）
@@ -40,6 +40,11 @@ Flask (app.py) ← 配信専用（import 時副作用なし）
   - `max_queue`（1024）と `ping_timeout`（60秒）を既定値から引き上げる。既定の `max_queue=16` は 60件/秒 のストリームでは0.3秒分しかなく、一瞬の処理遅延で受信スレッドが停止して Pong を返せなくなり、自分で keepalive タイムアウトを起こす。
   - `StalenessMonitor` が「イベントの `time_us` と投稿の `createdAt` の差」の中央値を5分ごとに評価し、15分以上ならホストの配信遅延として WARNING を出す。ホストが遅れても `time_us` は現在時刻のまま中身だけが古くなるため、カーソルの遅れでは検知できない。
   - 切断時のログにはカーソルの実時刻からの遅れを併記する。
+- **購読先の自動フェイルオーバー**（詳細は [2026-08-23 の us-east 停止レポート](reports/2026-08-23-jetstream-us-east停止.md)）: `EndpointRotator` が `config.JETSTREAM_ENDPOINTS`（`JETSTREAM_ENDPOINT` + `JETSTREAM_FALLBACK_ENDPOINTS`）を順に切り替える。候補を使い切ったら先頭へ戻り、全ホストが落ちていても再接続を続ける。切り替えの契機は2つ。
+  - **接続失敗が続いたとき**: 失敗が `FAILOVER_AFTER_FAILURES`（3回）連続したら次の候補へ移る。ハンドシェイクは通るのにイベントを流さないホストも捕まえるため、失敗の数え直しは「接続できた時点」ではなく「イベントが1件届いた時点」で行い、受信タイムアウトも失敗として数える。
+  - **配信が遅れているとき**: 遅延の中央値が `STALENESS_FAILOVER_SECONDS`（30分）を超えたら次の候補へ移る。警告だけ出す15分としきい値を分け、一時的な遅れで切り替えないようにしている。
+  - **切り替え時は理由によらずカーソルを8時間巻き戻す**（手動でのホスト変更と同じ扱い）。接続できずに切り替える場合も「落ちる直前まで遅れて配信していた」可能性は排除できず（遅延判定は5分間隔なので遅れ始めてすぐ落ちれば気づけない）、読み飛ばしより再生のコストを取る。長時間繋がらなかった場合は保存済みカーソルの方が古いため、`cursor_for_endpoint` の min により前進はしない。
+  - **自動で移った先は再起動後も引き継ぐ**（`initial_endpoint`）。第一候補へ戻すと、落ちたままのホストへ毎回繋ぎに行き、切り替えのたびに8時間分を再生し直すことになるため。人が `JETSTREAM_ENDPOINT` を変えた場合と区別できるよう、直近の起動時の第一候補を `IngestMeta`（キー: `jetstream_primary`）に記録し、それが変わっていれば記録を無視して第一候補から始める。
 - **購読ホストを変えたら起動時にカーソルを8時間巻き戻す。** 直近の購読先は `IngestMeta`（キー: `jetstream_endpoint`）に記録し、`JETSTREAM_ENDPOINT` と食い違ったら巻き戻す。切り替え前のホストが遅れていた場合、カーソルは実時刻付近を指していても投稿は未収集で、そのまま繋ぐと恒久的に読み飛ばすため。それより前まで戻すには `scripts/rewind_cursor.py --hours N` を使う。
 - 削除イベントを受けると DB からも該当投稿を削除し同期を維持する。
 - 保持期限（`FEEDGEN_POST_RETENTION_DAYS`、デフォルト30日）を過ぎた投稿は ingest が1時間ごとに削除する。

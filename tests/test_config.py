@@ -1,6 +1,10 @@
 import pytest
 
-from server.config import _get_bool_env_var, _parse_retention_days
+from server.config import (
+    _build_endpoint_candidates,
+    _get_bool_env_var,
+    _parse_retention_days,
+)
 
 
 class TestGetBoolEnvVar:
@@ -33,3 +37,31 @@ class TestParseRetentionDays:
     def test_non_integer_rejected(self):
         with pytest.raises(RuntimeError, match='integer'):
             _parse_retention_days('thirty')
+
+
+class TestBuildEndpointCandidates:
+    PRIMARY = 'wss://primary.example/subscribe'
+    OTHER = 'wss://other.example/subscribe'
+
+    def test_primary_comes_first(self):
+        assert _build_endpoint_candidates(self.PRIMARY, self.OTHER) == [self.PRIMARY, self.OTHER]
+
+    def test_multiple_fallbacks_keep_order(self):
+        third = 'wss://third.example/subscribe'
+        assert _build_endpoint_candidates(
+            self.PRIMARY, f'{self.OTHER};{third}'
+        ) == [self.PRIMARY, self.OTHER, third]
+
+    def test_duplicates_removed(self):
+        # 第一候補をフォールバックにも書いた場合、二重に試さない
+        assert _build_endpoint_candidates(
+            self.PRIMARY, f'{self.PRIMARY};{self.OTHER}'
+        ) == [self.PRIMARY, self.OTHER]
+
+    def test_whitespace_and_empty_entries_ignored(self):
+        assert _build_endpoint_candidates(
+            self.PRIMARY, f'  {self.OTHER}  ;;'
+        ) == [self.PRIMARY, self.OTHER]
+
+    def test_empty_fallbacks_disable_failover(self):
+        assert _build_endpoint_candidates(self.PRIMARY, '') == [self.PRIMARY]
