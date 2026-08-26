@@ -295,7 +295,6 @@ rank1 = [
     "最上級パンチライン",
     "月とネオンと薄紅と",
     "HELL-O",
-    "Take Ur Time",
     "Be-witched",
     "Sweet Boozy",
 ]
@@ -407,6 +406,7 @@ rank2 = [
     "Hold on me",
     "Here for you",
     "Lights on me",
+    "Take Ur Time",
 ]
 
 # 表面形（書かれたまま）の完全一致でのみ採用する語。
