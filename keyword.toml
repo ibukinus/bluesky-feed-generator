@@ -279,6 +279,25 @@ rank1 = [
     "Tokyo自由系*ガール",
     "泡沫に染まる",
     "I=WE",
+    "ハグルマヒマワリ",
+    "ワタシグラビティ",
+    "ガガリズム",
+    "ダミーガール",
+    "カラースプレーとうさぎさん",
+    "ハートフルデイ ハートフルミー",
+    "MAGICAL FOREST",
+    "恋するクオリア",
+    "ナイススパイス研究会",
+    "どっちみちLOVE",
+    "Crying Diamond",
+    "Embers glow",
+    "正解な不正解",
+    "最上級パンチライン",
+    "月とネオンと薄紅と",
+    "HELL-O",
+    "Take Ur Time",
+    "Be-witched",
+    "Sweet Boozy",
 ]
 
 rank2 = [
@@ -379,6 +398,15 @@ rank2 = [
     "たりラ",
     "My time",
     "ビーム",
+    "Unstoppable",
+    "パラボラ",
+    "Odette",
+    "Imaginary",
+    "Paradox",
+    "HSV色空間",
+    "Hold on me",
+    "Here for you",
+    "Lights on me",
 ]
 
 # 表面形（書かれたまま）の完全一致でのみ採用する語。
